@@ -665,8 +665,37 @@ jobs:
           flutter_root="$checkout_root/bin/flutter"
           checkout_depot="$checkout_root/engine/src/flutter/third_party/depot_tools"
           bundle_assembly="$RUNNER_TEMP/denial-arm64-bundle-assembly"
+          flutter_sdk_version="3.44.7"
           test -f "$output/libflutter_engine.so"
           test -x "$flutter_root"
+
+          # The lock-pinned checkout is synchronized without history or tags, so
+          # git describe cannot derive a Flutter SDK version and the tool falls
+          # back to 0.0.0-unknown, which fails pub resolution against the
+          # pubspec's pinned version. Tag the locked revision so git describe
+          # resolves the declared version, mirroring the managed SDK handling in
+          # tools/denial-pc::prepare_flutter_version_metadata.
+          locked_revision="$(
+            jq -er '.flutter.revision' prebuilt/flutter-engine/SOURCE_LOCK.json
+          )"
+          test "$(git -C "$checkout_root" rev-parse HEAD)" = "$locked_revision"
+          git -C "$checkout_root" tag --force \
+            "$flutter_sdk_version" "$locked_revision" >/dev/null
+          legacy_version_file="$checkout_root/version"
+          if [[ -f "$legacy_version_file" ]] \
+            && [[ "$(<"$legacy_version_file")" != "$flutter_sdk_version" ]]; then
+            rm -f -- "$legacy_version_file"
+          fi
+          version_file="$checkout_root/bin/cache/flutter.version.json"
+          if [[ -f "$version_file" ]] \
+            && ! jq -e \
+              --arg version "$flutter_sdk_version" \
+              --arg revision "$locked_revision" \
+              '.frameworkVersion == $version
+                and .frameworkRevision == $revision' \
+              "$version_file" >/dev/null; then
+            rm -f -- "$version_file"
+          fi
 
           PATH="$checkout_depot/.cipd_bin:$checkout_depot:$PATH" \
             DEPOT_TOOLS_UPDATE=0 \
