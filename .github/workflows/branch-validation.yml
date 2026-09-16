@@ -654,6 +654,30 @@ jobs:
           ls -la -- \
             prebuilt/flutter-engine/linux-arm64-release/
 
+      - name: Build x86-64 host Flutter engine tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The host tools consumed by the AArch64 asset assembly (Dart SDK,
+          # gen_snapshot, const_finder, font-subset, and the GTK engine used by
+          # LinuxDesktopArtifacts) must execute natively on this x86-64 runner.
+          # They cannot come from the arm64 engine out, whose binaries are
+          # AArch64 ELF. Build the lock-matched linux-x64 application graph into
+          # the same cache root and point --local-engine-host at it below.
+          export GITHUB_ACTIONS=true
+          export DENIAL_FLUTTER_ENGINE_CACHE_ROOT="$RUNNER_TEMP/denial-flutter-engine-arm64"
+          export DENIAL_FLUTTER_ENGINE_JOBS="$(nproc)"
+          tools/denial-flutter-engine prepare-app-build \
+            2>&1 | tee "$RUNNER_TEMP/denial-flutter-engine-host.txt"
+          host_output="$DENIAL_FLUTTER_ENGINE_CACHE_ROOT/build/out/denial_host_release"
+          test -x "$host_output/dart-sdk/bin/dart"
+          test -x "$host_output/gen_snapshot"
+          test -f "$host_output/font-subset"
+          test -f "$host_output/gen/const_finder.dart.snapshot"
+          test -f "$host_output/libflutter_linux_gtk.so"
+          file "$host_output/gen_snapshot" | grep -qi x86-64 \
+            || { printf 'host gen_snapshot is not x86-64\n' >&2; exit 1; }
+
       - name: Build AArch64 Denial Flutter shell bundle
         shell: bash
         run: |
@@ -716,7 +740,7 @@ jobs:
             "$flutter_root" assemble \
               --local-engine-src-path="$build_root" \
               --local-engine=denial_arm64_release \
-              --local-engine-host=denial_arm64_release \
+              --local-engine-host=denial_host_release \
               --suppress-analytics \
               --resource-pool-size="$(nproc)" \
               --output="$bundle_assembly" \
