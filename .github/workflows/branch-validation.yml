@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: denial-branch-validation-x86_64-${{ github.ref_name }}
+  group: denial-branch-validation-${{ github.ref_name }}
   cancel-in-progress: ${{ github.ref == 'refs/heads/dev' }}
 
 jobs:
@@ -425,6 +425,216 @@ jobs:
         with:
           name: denial-${{ github.ref_name }}-validated-candidate-${{ github.run_id }}
           path: ${{ runner.temp }}/denial-${{ github.ref_name }}-candidate.tar
+          if-no-files-found: error
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 7 }}
+          compression-level: 0
+
+  cross-aarch64:
+    name: Cross-compile AArch64 compositor from x86-64
+    needs: authorize
+    if: >-
+      github.ref == 'refs/heads/dev'
+      || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Define AArch64 cross-compile policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/heads/dev)
+              cross_class='development-aarch64-cross-probe'
+              ;;
+            refs/heads/main)
+              cross_class='production-aarch64-cross-probe'
+              ;;
+            *)
+              printf 'Unsupported cross-compile ref: %s\n' "$GITHUB_REF" >&2
+              exit 1
+              ;;
+          esac
+          {
+            printf 'CROSS_COMPILE_CLASS=%s\n' "$cross_class"
+            printf 'AARCH64_RUST_TARGET=%s\n' 'aarch64-unknown-linux-gnu'
+            printf 'AARCH64_CROSS_ROOT=%s\n' \
+              "$RUNNER_TEMP/denial-${GITHUB_REF_NAME}-aarch64-cross"
+            printf 'CARGO_TARGET_DIR=%s\n' \
+              "$RUNNER_TEMP/denial-${GITHUB_REF_NAME}-aarch64-target"
+            printf 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=%s\n' \
+              'aarch64-linux-gnu-gcc'
+            printf 'CC_aarch64_unknown_linux_gnu=%s\n' \
+              'aarch64-linux-gnu-gcc'
+            printf 'AR_aarch64_unknown_linux_gnu=%s\n' \
+              'aarch64-linux-gnu-ar'
+            printf 'PKG_CONFIG_ALLOW_CROSS=%s\n' '1'
+            printf 'PKG_CONFIG_PATH=%s\n' \
+              '/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig'
+          } >>"$GITHUB_ENV"
+
+      - name: Check out the exact pushed commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify source checkout
+        shell: bash
+        run: |
+          test "$(
+            git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD
+          )" = "$GITHUB_SHA"
+
+      - name: Install AArch64 cross toolchain and target libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            binutils-aarch64-linux-gnu \
+            gcc-aarch64-linux-gnu \
+            libdrm-dev:arm64 \
+            libgbm-dev:arm64 \
+            libinput-dev:arm64 \
+            libseat-dev:arm64 \
+            libudev-dev:arm64 \
+            libwayland-dev:arm64 \
+            libx11-dev:arm64 \
+            pkg-config
+          aarch64-linux-gnu-gcc --version >/dev/null
+          aarch64-linux-gnu-readelf --version >/dev/null
+
+      - name: Install pinned Rust toolchain with the AArch64 target
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p -- "$AARCH64_CROSS_ROOT"
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --default-toolchain none
+          fi
+          [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env" || true
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+          rustup target add aarch64-unknown-linux-gnu
+          {
+            printf 'PATH=%s\n' "$HOME/.cargo/bin:$PATH"
+          } >>"$GITHUB_ENV"
+          rustc -vV
+
+      - name: Fetch the locked Rust dependency closure
+        shell: bash
+        working-directory: compositor
+        run: |
+          set -euo pipefail
+          cargo fetch --locked
+
+      - name: Cross-compile deniald and denialctl for AArch64
+        shell: bash
+        working-directory: compositor
+        run: |
+          set -euo pipefail
+          cargo build --locked --release \
+            --target aarch64-unknown-linux-gnu \
+            --features flutter \
+            --bin deniald \
+            --bin denialctl
+          test -x \
+            "$CARGO_TARGET_DIR/aarch64-unknown-linux-gnu/release/deniald"
+          test -x \
+            "$CARGO_TARGET_DIR/aarch64-unknown-linux-gnu/release/denialctl"
+
+      - name: Cross-compile denial-portal for AArch64
+        shell: bash
+        working-directory: compositor
+        run: |
+          set -euo pipefail
+          cargo build --locked --release \
+            --target aarch64-unknown-linux-gnu \
+            -p denial-portal
+          test -x \
+            "$CARGO_TARGET_DIR/aarch64-unknown-linux-gnu/release/denial-portal"
+
+      - name: Verify AArch64 ELF binaries and assemble evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$CARGO_TARGET_DIR/aarch64-unknown-linux-gnu/release"
+          evidence_root="$AARCH64_CROSS_ROOT/evidence"
+          install -d -m 0755 "$evidence_root"
+          for binary in deniald denialctl denial-portal; do
+            binary_path="$release_dir/$binary"
+            test -x "$binary_path"
+            file "$binary_path" >"$evidence_root/$binary.file"
+            aarch64-linux-gnu-readelf -h "$binary_path" \
+              >"$evidence_root/$binary.readelf"
+            machine="$(
+              aarch64-linux-gnu-readelf -h "$binary_path" \
+                | awk '/Machine:/ { print $2 }'
+            )"
+            test "$machine" = AArch64 \
+              || {
+                printf 'Unexpected ELF machine: %s\n' "$machine" >&2
+                exit 1
+              }
+            aarch64-linux-gnu-objdump -p "$binary_path" \
+              | awk '/NEEDED/ { print }' \
+              >"$evidence_root/$binary.needed" || true
+            sha256sum "$binary_path" >>"$evidence_root/SHA256SUMS"
+          done
+          sha256sum --check --strict "$evidence_root/SHA256SUMS"
+          {
+            printf 'artifact_class=%s\n' "$CROSS_COMPILE_CLASS"
+            printf 'architecture=%s\n' aarch64
+            printf 'rust_target=%s\n' "$AARCH64_RUST_TARGET"
+            printf 'publication_authorized=false\n'
+            printf 'release_signing_eligible=false\n'
+            printf 'compile_mode=release\n'
+            printf 'source_commit=%s\n' "$GITHUB_SHA"
+            printf 'source_ref=%s\n' "$GITHUB_REF"
+            printf 'workflow_run=%s\n' "$GITHUB_RUN_ID"
+            printf 'workflow_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'workflow_event=%s\n' "$GITHUB_EVENT_NAME"
+            printf 'runner_name=%s\n' "$RUNNER_NAME"
+            printf 'runner_os=%s\n' "$RUNNER_OS"
+            printf 'runner_arch=%s\n' "$RUNNER_ARCH"
+            printf 'logical_cpus=%s\n' "$(nproc)"
+            printf 'created_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            uname -a
+          } >"$evidence_root/provenance.txt"
+          dpkg -l >"$evidence_root/host-packages.txt"
+          rustc -vV >"$evidence_root/rustc.txt"
+          printf '%s\n' \
+            'This is an early-CI AArch64 cross-compile probe built on an x86-64 host.' \
+            'It is not a signed or published release candidate and was not produced by a native AArch64 builder.' \
+            'It contains no Flutter shell, engine, or libapp.so payload; that lane needs an AArch64 Denial engine build.' \
+            >"$AARCH64_CROSS_ROOT/NOTICE.txt"
+          tar \
+            --create \
+            --file="$AARCH64_CROSS_ROOT.tar" \
+            --directory="$AARCH64_CROSS_ROOT" \
+            .
+
+      - name: Collect failed cross-compile diagnostics
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'AArch64 cross target library inventory:' >&2
+          ls /usr/lib/aarch64-linux-gnu 2>/dev/null \
+            | grep -E '^lib(drm|gbm|input|seat|udev|wayland|x11)' || true
+          if [[ -d "${CARGO_TARGET_DIR:-}" ]]; then
+            du -sh "$CARGO_TARGET_DIR" >&2 || true
+          fi
+
+      - name: Upload AArch64 cross-compile probe
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: denial-${{ github.ref_name }}-aarch64-cross-${{ github.run_id }}
+          path: ${{ runner.temp }}/denial-${{ github.ref_name }}-aarch64-cross.tar
           if-no-files-found: error
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 7 }}
           compression-level: 0
