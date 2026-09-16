@@ -766,11 +766,140 @@ jobs:
           printf '\nTrial AArch64 packages ready:\n'
           ls -la -- *.pkg.tar.zst *.deb
 
+      - name: Install engine build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends jq ninja-build unzip
+
+      - name: Build arm64 Flutter engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GITHUB_ACTIONS=true
+          export DENIAL_FLUTTER_ENGINE_TARGET=linux-arm64
+          export DENIAL_FLUTTER_ENGINE_REFRESH_ONLY=1
+          export DENIAL_FLUTTER_ENGINE_MODES=release
+          export DENIAL_FLUTTER_ENGINE_CACHE_ROOT="$RUNNER_TEMP/denial-flutter-engine-arm64"
+          export DENIAL_FLUTTER_ENGINE_JOBS="$(nproc)"
+          mkdir -p -- "$DENIAL_FLUTTER_ENGINE_CACHE_ROOT"
+          tools/denial-flutter-engine refresh-metadata \
+            2>&1 | tee "$RUNNER_TEMP/denial-flutter-engine-arm64.txt"
+          printf '\nEngine metadata:\n'
+          ls -la -- \
+            prebuilt/flutter-engine/linux-arm64-release/
+
+      - name: Assemble denial-flutter-engine AArch64 trial deb
+        shell: bash
+        run: |
+          set -euo pipefail
+          work_root="$RUNNER_TEMP/denial-engine-arm64-deb"
+          install -d -m 0755 "$work_root"
+          icudtl_zip="$work_root/linux-x64-artifacts.zip"
+          curl -fSL --max-time 300 \
+            "https://storage.googleapis.com/flutter_infra_release/flutter/69c8c61792f04cc809dfef0c910414fb9afc06cd/linux-x64/artifacts.zip" \
+            -o "$icudtl_zip"
+          unzip -q -j -o "$icudtl_zip" icudtl.dat -d "$work_root"
+          test -f "$work_root/icudtl.dat"
+
+          engine_source_root="prebuilt/flutter-engine/linux-arm64-release"
+          test -f "$engine_source_root/libflutter_engine.so"
+          test -f "$engine_source_root/args.gn"
+          test -f "$engine_source_root/libflutter_engine.so.sha256"
+
+          package_version="0.0.0"
+          package_release="1"
+          payload="$work_root/payload"
+          install -d -m 0755 \
+            "$payload/DEBIAN" \
+            "$payload/usr/lib/denial/flutter/lib" \
+            "$payload/usr/lib/denial/flutter/data" \
+            "$payload/usr/share/denial/flutter-engine" \
+            "$payload/usr/share/doc/denial-flutter-engine"
+          install -m 0755 \
+            "$engine_source_root/libflutter_engine.so" \
+            "$payload/usr/lib/denial/flutter/lib/libflutter_engine.so"
+          file "$payload/usr/lib/denial/flutter/lib/libflutter_engine.so" \
+            | grep -qi aarch64 \
+            || { printf 'Engine binary is not AArch64\n' >&2; exit 1; }
+          install -m 0644 \
+            "$work_root/icudtl.dat" \
+            "$payload/usr/lib/denial/flutter/data/icudtl.dat"
+          install -m 0644 \
+            prebuilt/flutter-engine/SOURCE_LOCK.json \
+            "$payload/usr/share/denial/flutter-engine/SOURCE_LOCK.json"
+          for metadata in args.gn libflutter_engine.so.sha256; do
+            install -m 0644 \
+              "$engine_source_root/$metadata" \
+              "$payload/usr/share/denial/flutter-engine/$metadata"
+          done
+          for revision_file in ENGINE_REVISION FLUTTER_REVISION; do
+            if [[ -f "$engine_source_root/$revision_file" ]]; then
+              install -m 0644 \
+                "$engine_source_root/$revision_file" \
+                "$payload/usr/share/denial/flutter-engine/$revision_file"
+            fi
+          done
+          for license_file in LICENSE.flutter LICENSE.third_party; do
+            if [[ -f "prebuilt/flutter-engine/linux-x64-release/$license_file" ]]; then
+              install -d -m 0755 \
+                "$payload/usr/share/licenses/denial-flutter-engine"
+              install -m 0644 \
+                "prebuilt/flutter-engine/linux-x64-release/$license_file" \
+                "$payload/usr/share/licenses/denial-flutter-engine/$license_file"
+            fi
+          done
+          installed_size="$(du -sk "$payload" | cut -f1)"
+          {
+            printf 'Package: denial-flutter-engine\n'
+            printf 'Version: %s-%s\n' "$package_version" "$package_release"
+            printf 'Architecture: arm64\n'
+            printf 'Maintainer: Doctor Logix <doctor.logix@gmail.com>\n'
+            printf 'Installed-Size: %s\n' "$installed_size"
+            printf 'Section: libs\n'
+            printf 'Priority: optional\n'
+            printf 'Depends: libc6 (>= 2.39), libfontconfig1\n'
+            printf 'Provides: denial-flutter-engine-abi (= 3.44.7.denial1)\n'
+            printf 'Conflicts: denial-flutter-engine-git\n'
+            printf 'Homepage: https://github.com/denialwm/denial\n'
+            printf 'Description: pinned Flutter Engine runtime for Denial (AArch64 trial)\n'
+            printf ' Source-built Flutter Engine generation coupled to Denial embedder ABI.\n'
+            printf ' This is an early-CI cross-compiled package built on an x86-64 host.\n'
+          } >"$payload/DEBIAN/control"
+          dpkg-deb \
+            --root-owner-group \
+            --uniform-compression \
+            -Zxz \
+            --build \
+            "$payload" \
+            "$work_root/denial-flutter-engine_${package_version}-${package_release}_arm64.deb"
+          echo "---"
+          dpkg-deb -I "$work_root/denial-flutter-engine_${package_version}-${package_release}_arm64.deb"
+          packages_dir="$RUNNER_TEMP/denial-aarch64-package-build/packages"
+          mkdir -p -- "$packages_dir"
+          cp -v "$work_root/denial-flutter-engine_${package_version}-${package_release}_arm64.deb" \
+            "$packages_dir/"
+          cd "$packages_dir"
+          sha256sum -- *.pkg.tar.zst *.deb >SHA256SUMS
+          sha256sum --check --strict SHA256SUMS
+
       - name: Upload AArch64 cross-compile probe
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: denial-${{ github.ref_name }}-aarch64-cross-${{ github.run_id }}
           path: ${{ runner.temp }}/denial-${{ github.ref_name }}-aarch64-cross.tar
+          if-no-files-found: error
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 7 }}
+          compression-level: 0
+
+      - name: Upload AArch64 engine metadata for dev commit
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: denial-${{ github.ref_name }}-aarch64-engine-meta-${{ github.run_id }}
+          path: |
+            prebuilt/flutter-engine/linux-arm64-release/args.gn
+            prebuilt/flutter-engine/linux-arm64-release/libflutter_engine.so.sha256
           if-no-files-found: error
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 7 }}
           compression-level: 0

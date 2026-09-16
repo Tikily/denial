@@ -27,12 +27,48 @@ else
   DEFAULT_BUILD_JOBS=1
 fi
 BUILD_JOBS="${DENIAL_FLUTTER_ENGINE_JOBS:-$DEFAULT_BUILD_JOBS}"
-MODES=(release debug profile)
+# For cross-compilation targets, only build release mode unless explicitly overridden.
+# Building debug+profile arm64 engine from an x86-64 host would push well past
+# GitHub Actions runner time limits.
+if [[ -n "${DENIAL_FLUTTER_ENGINE_MODES:-}" ]]; then
+  read -r -a MODES <<< "$DENIAL_FLUTTER_ENGINE_MODES"
+elif [[ "$ENGINE_TARGET" == linux-arm64 ]]; then
+  MODES=(release)
+else
+  MODES=(release debug profile)
+fi
 ARTIFACT_STAGING=''
 
 fail() {
   printf 'denial-flutter-engine: %s\n' "$*" >&2
   exit 1
+}
+
+# Architecture-aware engine target. linux-x64 keeps the existing host build;
+# linux-arm64 cross-compiles libflutter_engine.so for AArch64 from an x86-64
+# host using the engine's own GN cross tooling, pinned arm64 sysroot, and
+# locked prebuilt Dart SDK.
+ENGINE_TARGET="${DENIAL_FLUTTER_ENGINE_TARGET:-linux-x64}"
+
+validate_engine_target() {
+  case "$ENGINE_TARGET" in
+    linux-x64)
+      FLUTTER_LINUX_CPU='x64'
+      FLUTTER_HOST_CPU='x64'
+      ;;
+    linux-arm64)
+      FLUTTER_LINUX_CPU='arm64'
+      FLUTTER_HOST_CPU='x64'
+      ;;
+    *)
+      fail "unsupported DENIAL_FLUTTER_ENGINE_TARGET: $ENGINE_TARGET (expected linux-x64 or linux-arm64)"
+      ;;
+  esac
+}
+validate_engine_target
+require_host_target() {
+  [[ "$ENGINE_TARGET" == linux-x64 ]] \
+    || fail "$1 requires linux-x64 (host) engine target; use 'build' or 'refresh-metadata' for cross targets"
 }
 
 install_legacy_denial_environment_aliases() {
@@ -85,6 +121,10 @@ Commands:
   refresh-metadata
              After deliberately advancing SOURCE_LOCK.json, regenerate GN
              arguments and canonical checksums, then build and stage all modes.
+             For a first-time cross target (linux-arm64) this seeds the
+             metadata without a committed reference. Set
+             DENIAL_FLUTTER_ENGINE_REFRESH_ONLY=1 to leave the cache entry
+             alone when collecting the initial cross metadata and engines.
   verify     Require and verify an existing exact artifact hit.
 
 Environment:
@@ -93,6 +133,17 @@ Environment:
                                       Set both or neither.
   DENIAL_FLUTTER_ENGINE_CACHE_ROOT  Persistent build and artifact cache.
   DENIAL_FLUTTER_ENGINE_JOBS        Explicit Ninja parallelism.
+  DENIAL_FLUTTER_ENGINE_TARGET      Engine target: linux-x64 (default) or
+                                    linux-arm64 (cross-compiled on an x86-64
+                                    host). Cross builds default to release-only
+                                    unless DENIAL_FLUTTER_ENGINE_MODES is set.
+  DENIAL_FLUTTER_ENGINE_MODES       Space-separated modes for cache-key/build/
+                                    refresh. linux-x64 defaults to
+                                    'release debug profile'.
+  DENIAL_FLUTTER_ENGINE_REFRESH_ONLY
+                                      With refresh-metadata, stop after writing
+                                    generated metadata and the rebuilt engines;
+                                    skip the re-verify and stage-double-build.
   DENIAL_FLUTTER_ENGINE_DEDICATED_BUILDER
                                       Set to 1 to use every CPU by default.
   DENIAL_FLUTTER_TEST_COMMAND          Prepared lock-matched Flutter launcher
@@ -193,7 +244,7 @@ canonicalize_engine_build_id() (
 expected_engine_sha256() {
   local mode="$1"
   awk 'NR == 1 { print $1 }' \
-    "$ROOT/prebuilt/flutter-engine/linux-x64-$mode/libflutter_engine.so.sha256"
+    "$ROOT/prebuilt/flutter-engine/$ENGINE_TARGET-$mode/libflutter_engine.so.sha256"
 }
 
 verify_engine_exports() {
@@ -257,6 +308,14 @@ refresh_generated_args() {
   local expected_jobs
   local normalized="${generated}.denial-refresh.$$"
 
+  # First-time metadata refresh for a new target architecture has no committed
+  # reference file; seed it with the generated args verbatim.
+  if [[ ! -f "$reference" ]]; then
+    printf 'Seeding %s %s metadata without a committed reference\n' \
+      "$mode" "$ENGINE_TARGET"
+    install -m 0644 -- "$generated" "$destination"
+    return
+  fi
   expected_jobs="$(
     awk '$1 == "concurrent_toolchain_jobs" && $2 == "=" { print $3 }' \
       "$reference"
@@ -293,14 +352,14 @@ validate_source_lock() {
 cache_key() {
   {
     printf 'cache-schema=%s\n' "$CACHE_SCHEMA"
-    printf 'target=linux-x64\n'
+    printf 'target=%s\n' "$ENGINE_TARGET"
     printf 'source-lock=%s\n' "$(file_sha256 "$SOURCE_LOCK")"
     local mode
     for mode in "${MODES[@]}"; do
       printf '%s-args=%s\n' \
         "$mode" \
         "$(file_sha256 \
-          "$ROOT/prebuilt/flutter-engine/linux-x64-$mode/args.gn")"
+          "$ROOT/prebuilt/flutter-engine/$ENGINE_TARGET-$mode/args.gn")"
       printf '%s-expected=%s\n' \
         "$mode" \
         "$(expected_engine_sha256 "$mode")"
@@ -358,7 +417,7 @@ stage_artifacts() {
     || fail "cannot stage unverified Flutter engine cache entry: $key"
   for mode in "${MODES[@]}"; do
     source="$artifact_dir/$mode/libflutter_engine.so"
-    destination="$ROOT/prebuilt/flutter-engine/linux-x64-$mode/libflutter_engine.so"
+    destination="$ROOT/prebuilt/flutter-engine/$ENGINE_TARGET-$mode/libflutter_engine.so"
     install -m 0755 -- "$source" "$destination"
   done
   printf 'Staged verified Flutter engines into prebuilt/ for local builds: %s\n' "$key"
@@ -664,16 +723,23 @@ build_artifacts() {
   trap cleanup_artifact_staging EXIT
 
   for mode in "${MODES[@]}"; do
-    target="denial_host_$mode"
+    local target_extra=()
+    if [[ "$ENGINE_TARGET" == linux-arm64 ]]; then
+      target_extra=(--target-os=linux --linux-cpu="$FLUTTER_LINUX_CPU")
+      target="denial_arm64_$mode"
+    else
+      target="denial_host_$mode"
+    fi
     output="$BUILD_ROOT/out/$target"
-    expected_args="$ROOT/prebuilt/flutter-engine/linux-x64-$mode/args.gn"
-    printf 'Generating %s engine build graph\n' "$mode"
+    expected_args="$ROOT/prebuilt/flutter-engine/$ENGINE_TARGET-$mode/args.gn"
+    printf 'Generating %s engine build graph for %s\n' "$mode" "$ENGINE_TARGET"
     (
       cd "$build_root"
       PATH="$checkout_depot/.cipd_bin:$checkout_depot:$PATH" \
         DEPOT_TOOLS_UPDATE=0 \
         VPYTHON_VIRTUALENV_ROOT="$VPYTHON_CACHE_ROOT" \
         ./flutter/tools/gn \
+          "${target_extra[@]}" \
           --runtime-mode="$mode" \
           --enable-fontconfig \
           --out-dir="$BUILD_ROOT" \
@@ -767,17 +833,24 @@ refresh_metadata() {
   trap '[[ -z "${metadata_stage:-}" ]] || rm -rf --one-file-system -- "$metadata_stage"' EXIT
 
   for mode in "${MODES[@]}"; do
-    target="denial_host_$mode"
+    local target_extra=()
+    if [[ "$ENGINE_TARGET" == linux-arm64 ]]; then
+      target_extra=(--target-os=linux --linux-cpu="$FLUTTER_LINUX_CPU")
+      target="denial_arm64_$mode"
+    else
+      target="denial_host_$mode"
+    fi
     output="$BUILD_ROOT/out/$target"
-    expected_args="$ROOT/prebuilt/flutter-engine/linux-x64-$mode/args.gn"
+    expected_args="$ROOT/prebuilt/flutter-engine/$ENGINE_TARGET-$mode/args.gn"
     install -d -m 0700 "$metadata_stage/$mode"
-    printf 'Refreshing %s engine build metadata\n' "$mode"
+    printf 'Refreshing %s engine build metadata for %s\n' "$mode" "$ENGINE_TARGET"
     (
       cd "$build_root"
       PATH="$checkout_depot/.cipd_bin:$checkout_depot:$PATH" \
         DEPOT_TOOLS_UPDATE=0 \
         VPYTHON_VIRTUALENV_ROOT="$VPYTHON_CACHE_ROOT" \
         ./flutter/tools/gn \
+          "${target_extra[@]}" \
           --runtime-mode="$mode" \
           --enable-fontconfig \
           --out-dir="$BUILD_ROOT" \
@@ -814,17 +887,20 @@ refresh_metadata() {
   done
 
   for mode in "${MODES[@]}"; do
+    install -d -m 0755 \
+      "$ROOT/prebuilt/flutter-engine/$ENGINE_TARGET-$mode"
     install -m 0644 \
       "$metadata_stage/$mode/args.gn" \
-      "$ROOT/prebuilt/flutter-engine/linux-x64-$mode/args.gn"
+      "$ROOT/prebuilt/flutter-engine/$ENGINE_TARGET-$mode/args.gn"
     install -m 0644 \
       "$metadata_stage/$mode/libflutter_engine.so.sha256" \
-      "$ROOT/prebuilt/flutter-engine/linux-x64-$mode/libflutter_engine.so.sha256"
+      "$ROOT/prebuilt/flutter-engine/$ENGINE_TARGET-$mode/libflutter_engine.so.sha256"
     install -m 0755 \
       "$metadata_stage/$mode/libflutter_engine.so" \
-      "$ROOT/prebuilt/flutter-engine/linux-x64-$mode/libflutter_engine.so"
+      "$ROOT/prebuilt/flutter-engine/$ENGINE_TARGET-$mode/libflutter_engine.so"
   done
-  printf 'Refreshed tracked Flutter engine metadata for source lock %s\n' \
+  printf 'Refreshed tracked Flutter engine metadata (%s) for source lock %s\n' \
+    "$ENGINE_TARGET" \
     "$(file_sha256 "$SOURCE_LOCK")"
   rm -rf --one-file-system -- "$metadata_stage"
   trap - EXIT
@@ -864,6 +940,7 @@ resolve_artifacts() {
 }
 
 run_flutter_tests() {
+  require_host_target flutter-test
   local checkout_depot
   local engine_source_root
   local expected_args
@@ -936,6 +1013,7 @@ run_flutter_tests() {
 }
 
 prepare_app_build() {
+  require_host_target prepare-app-build
   local build_root
   local checkout_depot
   local expected_args
@@ -1004,6 +1082,7 @@ prepare_app_build() {
 }
 
 prepare_development_sdk() {
+  require_host_target prepare-development-sdk
   local checkout_depot
   local engine_source_root
   local expected_args
@@ -1155,8 +1234,10 @@ main() {
       [[ -z "$github_env" ]] \
         || fail 'refresh-metadata does not accept --github-env'
       refresh_metadata
-      resolve_artifacts 1 ''
-      stage_artifacts "$(cache_key)"
+      if [[ -z "${DENIAL_FLUTTER_ENGINE_REFRESH_ONLY:-}" ]]; then
+        resolve_artifacts 1 ''
+        stage_artifacts "$(cache_key)"
+      fi
       ;;
     verify)
       resolve_artifacts 0 "$github_env"
