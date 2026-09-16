@@ -492,6 +492,17 @@ jobs:
         run: |
           set -euo pipefail
           sudo dpkg --add-architecture arm64
+          sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' \
+            /etc/apt/sources.list.d/ubuntu.sources
+          {
+            printf '%s\n' \
+              'Types: deb' \
+              'URIs: http://ports.ubuntu.com/ubuntu-ports/' \
+              'Suites: noble noble-updates noble-backports noble-security' \
+              'Components: main restricted universe multiverse' \
+              'Architectures: arm64' \
+              'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
+          } | sudo tee /etc/apt/sources.list.d/arm64.sources >/dev/null
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             binutils-aarch64-linux-gnu \
