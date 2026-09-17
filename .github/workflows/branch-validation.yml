@@ -922,7 +922,10 @@ jobs:
           cp -v "$work_root/denial-flutter-engine_${package_version}-${package_release}_arm64.deb" \
             "$packages_dir/"
           cd "$packages_dir"
-          sha256sum -- *.pkg.tar.zst *.deb >SHA256SUMS
+          # This step assembles only the engine deb trial; an unmatched
+          # '*.pkg.tar.zst' glob would be passed literally (no nullglob) and
+          # fail sha256sum, so sum the deb present here only.
+          sha256sum -- *.deb >SHA256SUMS
           sha256sum --check --strict SHA256SUMS
 
       - name: Assemble trial AArch64 packages
