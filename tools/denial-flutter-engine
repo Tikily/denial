@@ -27,6 +27,11 @@ else
   DEFAULT_BUILD_JOBS=1
 fi
 BUILD_JOBS="${DENIAL_FLUTTER_ENGINE_JOBS:-$DEFAULT_BUILD_JOBS}"
+# Architecture-aware engine target. linux-x64 keeps the existing host build;
+# linux-arm64 cross-compiles libflutter_engine.so for AArch64 from an x86-64
+# host using the engine's own GN cross tooling, pinned arm64 sysroot, and
+# locked prebuilt Dart SDK.
+ENGINE_TARGET="${DENIAL_FLUTTER_ENGINE_TARGET:-linux-x64}"
 # For cross-compilation targets, only build release mode unless explicitly overridden.
 # Building debug+profile arm64 engine from an x86-64 host would push well past
 # GitHub Actions runner time limits.
@@ -43,12 +48,6 @@ fail() {
   printf 'denial-flutter-engine: %s\n' "$*" >&2
   exit 1
 }
-
-# Architecture-aware engine target. linux-x64 keeps the existing host build;
-# linux-arm64 cross-compiles libflutter_engine.so for AArch64 from an x86-64
-# host using the engine's own GN cross tooling, pinned arm64 sysroot, and
-# locked prebuilt Dart SDK.
-ENGINE_TARGET="${DENIAL_FLUTTER_ENGINE_TARGET:-linux-x64}"
 
 validate_engine_target() {
   case "$ENGINE_TARGET" in
