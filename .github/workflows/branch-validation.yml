@@ -772,18 +772,39 @@ jobs:
           # This custom linux cross config builds gen_snapshot with the target
           # toolchain, so the root denial_arm64_release/gen_snapshot is an
           # AArch64 ELF that cannot run on this x86-64 runner. flutter_tools
-          # probes the target out for the AOT snapshotter in order ('.' then
-          # clang_x64); stage the x86-64 host binary into both candidate
-          # locations so the snapshotter executes natively.
-          install -m 0755 \
-            "$build_root/out/denial_host_release/gen_snapshot" \
-            "$output/gen_snapshot"
+          # resolves the AOT snapshotter from the TARGET engine out
+          # (artifacts.dart:_genSnapshotPath) by scanning clangDirs in order
+          # ['.', 'universal', 'clang_x64', 'clang_x86', 'clang_i386',
+          # 'clang_arm64', 'clang_riscv64'] and returning the first candidate
+          # that canRun() accepts, so '.', the root, has first priority even
+          # for cross targets. Verify the host binary is native before copying
+          # it over both the root and clang_x64/ candidates.
+          host_gen_snapshot="$build_root/out/denial_host_release/gen_snapshot"
+          test -x "$host_gen_snapshot"
+          file "$host_gen_snapshot" | grep -qi x86-64 \
+            || { printf 'host gen_snapshot is not x86-64\n' >&2; exit 1; }
+          install -m 0755 "$host_gen_snapshot" "$output/gen_snapshot"
           install -d -m 0755 "$output/clang_x64"
-          install -m 0755 \
-            "$build_root/out/denial_host_release/gen_snapshot" \
-            "$output/clang_x64/gen_snapshot"
-          file "$output/gen_snapshot" | grep -qi x86-64 \
-            || { printf 'staged gen_snapshot is not x86-64\n' >&2; exit 1; }
+          install -m 0755 "$host_gen_snapshot" "$output/clang_x64/gen_snapshot"
+          # Mirror flutter_tools' exact scan to prove the path it will resolve
+          # to carries a native snapshotter, not just the copy we planted.
+          resolved_gen_snapshot=""
+          for clang_dir in . universal clang_x64 clang_x86 clang_i386 \
+            clang_arm64 clang_riscv64; do
+            candidate="$output/${clang_dir}/gen_snapshot"
+            if [[ -f "$candidate" && -x "$candidate" ]]; then
+              resolved_gen_snapshot="$candidate"
+              break
+            fi
+          done
+          test -n "$resolved_gen_snapshot" \
+            || { printf 'no runnable gen_snapshot in target engine out\n' >&2; exit 1; }
+          file "$resolved_gen_snapshot" | grep -qi x86-64 \
+            || {
+              printf 'flutter_tools would resolve a non-x86-64 gen_snapshot: %s\n' \
+                "$resolved_gen_snapshot" >&2
+              exit 1
+            }
 
           install -d -m 0755 "$bundle_assembly"
           (
