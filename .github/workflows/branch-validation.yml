@@ -667,6 +667,22 @@ jobs:
           export GITHUB_ACTIONS=true
           export DENIAL_FLUTTER_ENGINE_CACHE_ROOT="$RUNNER_TEMP/denial-flutter-engine-arm64"
           export DENIAL_FLUTTER_ENGINE_JOBS="$(nproc)"
+          # The lock-pinned engine sysroot tarball ships the GLib and GTK header
+          # sets but omits the generated per-architecture configuration headers
+          # (glibconfig.h, gdkconfig.h) that only exist in per-architecture
+          # package builds. Restore them into the sysroot include directories
+          # already placed on the compiler search path so the host Linux GTK
+          # shell (libflutter_linux_gtk.so) can compile on a fresh runner.
+          sudo apt-get install -y --no-install-recommends \
+            libglib2.0-dev libgtk-3-dev
+          amd64_sysroot="$DENIAL_FLUTTER_ENGINE_CACHE_ROOT/checkout/engine/src/build/linux/debian_bullseye_amd64-sysroot"
+          test -d "$amd64_sysroot"
+          install -m 0644 \
+            /usr/lib/x86_64-linux-gnu/glib-2.0/include/glibconfig.h \
+            "$amd64_sysroot/usr/include/glib-2.0/glibconfig.h"
+          install -m 0644 \
+            /usr/lib/x86_64-linux-gnu/gtk-3.0/include/gdkconfig.h \
+            "$amd64_sysroot/usr/include/gtk-3.0/gdkconfig.h"
           tools/denial-flutter-engine prepare-app-build \
             2>&1 | tee "$RUNNER_TEMP/denial-flutter-engine-host.txt"
           host_output="$DENIAL_FLUTTER_ENGINE_CACHE_ROOT/build/out/denial_host_release"
