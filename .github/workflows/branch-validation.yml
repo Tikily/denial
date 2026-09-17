@@ -765,29 +765,30 @@ jobs:
               -j "$(nproc)" \
               dart_sdk \
               gen_snapshot \
+              clang_x64/gen_snapshot \
               flutter_patched_sdk/platform_strong.dill \
               flutter/tools/const_finder:const_finder \
               flutter/tools/font_subset:font_subset
 
-          # This custom linux cross config builds gen_snapshot with the target
-          # toolchain, so the root denial_arm64_release/gen_snapshot is an
-          # AArch64 ELF that cannot run on this x86-64 runner. flutter_tools
-          # resolves the AOT snapshotter from the TARGET engine out
-          # (artifacts.dart:_genSnapshotPath) by scanning clangDirs in order
-          # ['.', 'universal', 'clang_x64', 'clang_x86', 'clang_i386',
-          # 'clang_arm64', 'clang_riscv64'] and returning the first candidate
-          # that canRun() accepts, so '.', the root, has first priority even
-          # for cross targets. Verify the host binary is native before copying
-          # it over both the root and clang_x64/ candidates.
-          host_gen_snapshot="$build_root/out/denial_host_release/gen_snapshot"
-          test -x "$host_gen_snapshot"
-          file "$host_gen_snapshot" | grep -qi x86-64 \
-            || { printf 'host gen_snapshot is not x86-64\n' >&2; exit 1; }
-          install -m 0755 "$host_gen_snapshot" "$output/gen_snapshot"
-          install -d -m 0755 "$output/clang_x64"
-          install -m 0755 "$host_gen_snapshot" "$output/clang_x64/gen_snapshot"
+          # In this custom linux cross config the root gen_snapshot is built by
+          # the target toolchain and is an AArch64 ELF that cannot run on this
+          # x86-64 runner. The host toolchain instead emits
+          # out/denial_arm64_release/clang_x64/gen_snapshot: an x86-64 ELF
+          # built against the arm64 target that runs on the host and produces
+          # AArch64 AOT ELF. A host-out (linux-x64) gen_snapshot would emit
+          # x86-64 AOT, which flutter_tools rejects with
+          # "libapp.so is not AArch64". flutter_tools resolves the AOT
+          # snapshotter from the TARGET engine out (artifacts.dart:
+          # _genSnapshotPath) by scanning clangDirs in order ['.', 'universal',
+          # 'clang_x64', ...] and returning the first canRun() candidate, so
+          # stage the arm64-emitting host binary over the root candidate.
+          cross_gen_snapshot="$output/clang_x64/gen_snapshot"
+          test -x "$cross_gen_snapshot"
+          file "$cross_gen_snapshot" | grep -qi x86-64 \
+            || { printf 'arm64 clang_x64 gen_snapshot is not x86-64\n' >&2; exit 1; }
+          install -m 0755 "$cross_gen_snapshot" "$output/gen_snapshot"
           # Mirror flutter_tools' exact scan to prove the path it will resolve
-          # to carries a native snapshotter, not just the copy we planted.
+          # to carries the native (arm64-emitting) host snapshotter.
           resolved_gen_snapshot=""
           for clang_dir in . universal clang_x64 clang_x86 clang_i386 \
             clang_arm64 clang_riscv64; do
