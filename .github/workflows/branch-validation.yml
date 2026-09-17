@@ -670,19 +670,39 @@ jobs:
           # The lock-pinned engine sysroot tarball ships the GLib and GTK header
           # sets but omits the generated per-architecture configuration headers
           # (glibconfig.h, gdkconfig.h) that only exist in per-architecture
-          # package builds. Restore them into the sysroot include directories
-          # already placed on the compiler search path so the host Linux GTK
-          # shell (libflutter_linux_gtk.so) can compile on a fresh runner.
+          # package builds. Restore them into every sysroot include directory
+          # that GN may put on the compiler search path so the host Linux GTK
+          # shell (libflutter_linux_gtk.so) can compile on a fresh runner,
+          # regardless of the GLib/GTK packaging layout of the runner.
           sudo apt-get install -y --no-install-recommends \
             libglib2.0-dev libgtk-3-dev
           amd64_sysroot="$DENIAL_FLUTTER_ENGINE_CACHE_ROOT/checkout/engine/src/build/linux/debian_bullseye_amd64-sysroot"
           test -d "$amd64_sysroot"
-          install -m 0644 \
-            /usr/lib/x86_64-linux-gnu/glib-2.0/include/glibconfig.h \
-            "$amd64_sysroot/usr/include/glib-2.0/glibconfig.h"
-          install -m 0644 \
-            /usr/lib/x86_64-linux-gnu/gtk-3.0/include/gdkconfig.h \
-            "$amd64_sysroot/usr/include/gtk-3.0/gdkconfig.h"
+          restore_sysroot_header() {
+            local name="$1"
+            shift
+            local sources
+            local source
+            local destination
+            sources="$(find /usr/lib /usr/include -name "$name" -print 2>/dev/null || true)"
+            [[ -n "$sources" ]] \
+              || { printf 'missing system %s\n' "$name" >&2; exit 1; }
+            while IFS= read -r source; do
+              for destination in "$@"; do
+                install -D -m 0644 \
+                  "$source" "$amd64_sysroot$destination"
+              done
+            done <<<"$sources"
+          }
+          restore_sysroot_header glibconfig.h \
+            /usr/include/glib-2.0/glibconfig.h \
+            /usr/lib/glib-2.0/include/glibconfig.h \
+            /usr/lib/x86_64-linux-gnu/glib-2.0/include/glibconfig.h
+          restore_sysroot_header gdkconfig.h \
+            /usr/include/gtk-3.0/gdk/gdkconfig.h \
+            /usr/include/gtk-3.0/gdkconfig.h \
+            /usr/lib/gtk-3.0/include/gdkconfig.h \
+            /usr/lib/x86_64-linux-gnu/gtk-3.0/include/gdkconfig.h
           tools/denial-flutter-engine prepare-app-build \
             2>&1 | tee "$RUNNER_TEMP/denial-flutter-engine-host.txt"
           host_output="$DENIAL_FLUTTER_ENGINE_CACHE_ROOT/build/out/denial_host_release"
