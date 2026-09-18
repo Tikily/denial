@@ -998,7 +998,15 @@ jobs:
           # the lock-pinned engine's AArch64 Debian sysroot rather than any
           # :arm64 host package, so the runner is built against the same GLib
           # and GTK the GTK engine shell itself was cross-compiled against and
-          # no arm64 host dev package is required.
+          # no arm64 host dev package is required. The cross g++ does not add
+          # the sysroot's glibc multiarch header directory itself (the engine
+          # relies on clang + --sysroot for that), so put
+          # usr/include/aarch64-linux-gnu on the include path to satisfy the
+          # bits/signum.h-style glibc headers the sysroot GLib/GTK headers pull
+          # in.
+          arm64_multiarch_include="$arm64_sysroot/usr/include/aarch64-linux-gnu"
+          test -d "$arm64_multiarch_include" \
+            || { printf 'missing AArch64 multiarch include dir in sysroot\n' >&2; exit 1; }
           arm64_pc_dirs=()
           for arm64_pc_dir in \
             "$arm64_sysroot/usr/lib/aarch64-linux-gnu/pkgconfig" \
@@ -1032,6 +1040,7 @@ jobs:
             -DAPPLICATION_ID='"dev.denial.Settings"' \
             -I "$settings_app/linux" \
             -I "$output" \
+            -I "$arm64_multiarch_include" \
             -pthread \
             $gtk_cflags \
             "$settings_app/linux/runner/main.cc" \
