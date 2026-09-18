@@ -1007,6 +1007,11 @@ jobs:
           # g++'s own complete AArch64 glibc headers while the GTK/GLib
           # package subdirectories (and the restored glibconfig/gdkconfig)
           # still come from the sysroot.
+          # The sysroot also omits the gtk closure's runtime deps (epoxy,
+          # fontconfig, the X11 GL stack); --allow-shlib-undefined licenses
+          # those undefined references to resolve against the target's own
+          # system libraries at runtime, exactly as the engine GTK shell's own
+          # link relied on it against this same sysroot.
           arm64_pc_dirs=()
           for arm64_pc_dir in \
             "$arm64_sysroot/usr/lib/aarch64-linux-gnu/pkgconfig" \
@@ -1057,6 +1062,7 @@ jobs:
             -L "$arm64_sysroot/usr/lib/aarch64-linux-gnu" \
             -lflutter_linux_gtk \
             $gtk_libs \
+            -Wl,--allow-shlib-undefined \
             -o "$settings_bundle/denial-settings"
           file "$settings_bundle/denial-settings" | grep -qi aarch64 \
             || { printf 'denial-settings runner is not AArch64\n' >&2; exit 1; }
