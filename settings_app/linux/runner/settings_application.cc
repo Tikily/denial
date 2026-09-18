@@ -6,6 +6,10 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
+#ifndef G_APPLICATION_DEFAULT_FLAGS
+#define G_APPLICATION_DEFAULT_FLAGS G_APPLICATION_FLAGS_NONE
+#endif
+
 struct _SettingsApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
