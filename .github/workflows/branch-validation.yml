@@ -510,7 +510,6 @@ jobs:
             g++-aarch64-linux-gnu \
             libdrm-dev:arm64 \
             libgbm-dev:arm64 \
-            libgtk-3-dev:arm64 \
             libinput-dev:arm64 \
             libseat-dev:arm64 \
             libudev-dev:arm64 \
@@ -862,31 +861,41 @@ jobs:
           # Mirror the host lane's sysroot header restore: the arm64 sysroot
           # ships the GLib and GTK header sets but omits the generated
           # per-architecture configuration headers (glibconfig.h, gdkconfig.h).
-          # Restore the arm64 packages' variants into the arm64 sysroot before
-          # compiling the GTK shell, using explicit multiarch paths so the
-          # x86-64 host headers never shadow them.
-          sudo apt-get install -y --no-install-recommends \
-            libglib2.0-dev:arm64 \
-            libgtk-3-dev:arm64
+          # AArch64 and x86-64 are both LP64 little-endian, so the host
+          # packages' generated glibconfig.h carries identical values and the
+          # GTK gdkconfig.h is architecture-independent; restore every source
+          # the host dev packages installed into every sysroot include
+          # directory that GN may put on the compiler search path. This avoids
+          # installing any :arm64 GTK/GLib dev packages on the host, whose
+          # version-pinned dependency (libglib2.0-dev-bin:arm64) is not
+          # publish-satisfiable on ports.ubuntu.com for noble.
           arm64_sysroot="$checkout_root/engine/src/build/linux/debian_bullseye_arm64-sysroot"
           test -d "$arm64_sysroot"
-          glibconfig_src="/usr/lib/aarch64-linux-gnu/glib-2.0/include/glibconfig.h"
-          gdkconfig_src="/usr/lib/aarch64-linux-gnu/gtk-3.0/include/gdkconfig.h"
-          test -f "$glibconfig_src"
-          test -f "$gdkconfig_src"
-          for destination in \
-            "/usr/include/glib-2.0/glibconfig.h" \
-            "/usr/lib/glib-2.0/include/glibconfig.h" \
-            "/usr/lib/aarch64-linux-gnu/glib-2.0/include/glibconfig.h"; do
-            install -D -m 0644 "$glibconfig_src" "$arm64_sysroot$destination"
-          done
-          for destination in \
-            "/usr/include/gtk-3.0/gdk/gdkconfig.h" \
-            "/usr/include/gtk-3.0/gdkconfig.h" \
-            "/usr/lib/gtk-3.0/include/gdkconfig.h" \
-            "/usr/lib/aarch64-linux-gnu/gtk-3.0/include/gdkconfig.h"; do
-            install -D -m 0644 "$gdkconfig_src" "$arm64_sysroot$destination"
-          done
+          restore_sysroot_header() {
+            local name="$1"
+            shift
+            local sources
+            local source
+            local destination
+            sources="$(find /usr/lib /usr/include -name "$name" -print 2>/dev/null || true)"
+            [[ -n "$sources" ]] \
+              || { printf 'missing system %s\n' "$name" >&2; exit 1; }
+            while IFS= read -r source; do
+              for destination in "$@"; do
+                install -D -m 0644 \
+                  "$source" "$arm64_sysroot$destination"
+              done
+            done <<<"$sources"
+          }
+          restore_sysroot_header glibconfig.h \
+            /usr/include/glib-2.0/glibconfig.h \
+            /usr/lib/glib-2.0/include/glibconfig.h \
+            /usr/lib/aarch64-linux-gnu/glib-2.0/include/glibconfig.h
+          restore_sysroot_header gdkconfig.h \
+            /usr/include/gtk-3.0/gdk/gdkconfig.h \
+            /usr/include/gtk-3.0/gdkconfig.h \
+            /usr/lib/gtk-3.0/include/gdkconfig.h \
+            /usr/lib/aarch64-linux-gnu/gtk-3.0/include/gdkconfig.h
 
           PATH="$checkout_depot/.cipd_bin:$checkout_depot:$PATH" \
             DEPOT_TOOLS_UPDATE=0 \
@@ -985,18 +994,39 @@ jobs:
           # flutter_tools still rejects x86-64 -> arm64 cross builds. Mirror the
           # runner CMake: cxx_std_14, -Wall -Werror, -O3, NDEBUG for release,
           # APPLICATION_ID, the project dir on the include path, a link against
-          # the arm64 GTK engine, and an $ORIGIN/lib runpath.
+          # the arm64 GTK engine, and an $ORIGIN/lib runpath. Resolve GTK from
+          # the lock-pinned engine's AArch64 Debian sysroot rather than any
+          # :arm64 host package, so the runner is built against the same GLib
+          # and GTK the GTK engine shell itself was cross-compiled against and
+          # no arm64 host dev package is required.
+          arm64_pc_dirs=()
+          for arm64_pc_dir in \
+            "$arm64_sysroot/usr/lib/aarch64-linux-gnu/pkgconfig" \
+            "$arm64_sysroot/usr/lib/pkgconfig" \
+            "$arm64_sysroot/usr/share/pkgconfig"; do
+            if [[ -d "$arm64_pc_dir" ]]; then
+              arm64_pc_dirs+=("$arm64_pc_dir")
+            fi
+          done
+          [[ ${#arm64_pc_dirs[@]} -gt 0 ]] \
+            || { printf 'no pkg-config directory in the AArch64 sysroot\n' >&2; exit 1; }
+          arm64_pc_path="$(
+            IFS=:
+            printf '%s\n' "${arm64_pc_dirs[*]}"
+          )"
           cross_pc="$(command -v pkg-config)"
-          gtk_cflags="$(
+          gtk_pc_flags() {
             PKG_CONFIG_ALLOW_CROSS=1 \
-            PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
-            "$cross_pc" --cflags gtk+-3.0
-          )"
-          gtk_libs="$(
-            PKG_CONFIG_ALLOW_CROSS=1 \
-            PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
-            "$cross_pc" --libs gtk+-3.0
-          )"
+            PKG_CONFIG_SYSROOT_DIR="$arm64_sysroot" \
+            PKG_CONFIG_PATH="$arm64_pc_path" \
+            "$cross_pc" "$@"
+          }
+          if gtk_cflags="$(gtk_pc_flags --cflags gtk+-3.0 json-glib-1.0)"; then
+            gtk_libs="$(gtk_pc_flags --libs gtk+-3.0 json-glib-1.0)"
+          else
+            gtk_cflags="$(gtk_pc_flags --cflags gtk+-3.0)"
+            gtk_libs="$(gtk_pc_flags --libs gtk+-3.0)"
+          fi
           aarch64-linux-gnu-g++ \
             -std=c++14 -Wall -Werror -O3 -DNDEBUG \
             -DAPPLICATION_ID='"dev.denial.Settings"' \
