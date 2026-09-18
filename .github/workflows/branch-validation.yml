@@ -1052,9 +1052,11 @@ jobs:
             "$settings_app/linux/runner/settings_application.cc" \
             "$settings_app/linux/flutter/generated_plugin_registrant.cc" \
             -L "$output" \
+            -Wl,-rpath,'$ORIGIN/lib' \
+            -Wl,-rpath-link,"$arm64_sysroot/usr/lib/aarch64-linux-gnu" \
+            -L "$arm64_sysroot/usr/lib/aarch64-linux-gnu" \
             -lflutter_linux_gtk \
             $gtk_libs \
-            -Wl,-rpath,'$ORIGIN/lib' \
             -o "$settings_bundle/denial-settings"
           file "$settings_bundle/denial-settings" | grep -qi aarch64 \
             || { printf 'denial-settings runner is not AArch64\n' >&2; exit 1; }
