@@ -507,8 +507,10 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             binutils-aarch64-linux-gnu \
             gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
             libdrm-dev:arm64 \
             libgbm-dev:arm64 \
+            libgtk-3-dev:arm64 \
             libinput-dev:arm64 \
             libseat-dev:arm64 \
             libudev-dev:arm64 \
@@ -517,6 +519,7 @@ jobs:
             libxkbcommon-dev:arm64 \
             pkg-config
           aarch64-linux-gnu-gcc --version >/dev/null
+          aarch64-linux-gnu-g++ --version >/dev/null
           aarch64-linux-gnu-readelf --version >/dev/null
 
       - name: Install pinned Rust toolchain with the AArch64 target
@@ -831,6 +834,189 @@ jobs:
             || { printf 'libapp.so is not AArch64\n' >&2; exit 1; }
           printf 'AArch64 shell bundle assembled at %s\n' "$bundle_assembly"
 
+      - name: Build AArch64 Denial settings bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          engine_cache="$RUNNER_TEMP/denial-flutter-engine-arm64"
+          build_root="$engine_cache/build"
+          output="$build_root/out/denial_arm64_release"
+          checkout_root="$engine_cache/checkout"
+          flutter_root="$checkout_root/bin/flutter"
+          checkout_depot="$checkout_root/engine/src/flutter/third_party/depot_tools"
+          settings_app="$GITHUB_WORKSPACE/settings_app"
+          settings_assembly="$RUNNER_TEMP/denial-arm64-settings-assembly"
+          settings_bundle="$RUNNER_TEMP/denial-arm64-settings-bundle"
+          test -f "$output/libflutter_engine.so"
+          test -x "$flutter_root"
+
+          # The settings runner is a GTK Flutter application. Its AOT libapp.so
+          # and flutter_assets come from a linux-arm64 asset assembly and its
+          # denial-settings ELF is cross-compiled below, but the bundle also
+          # needs an AArch64 libflutter_linux_gtk.so. The arm64 engine out's GN
+          # graph includes the desktop embedder (enable_desktop_embeddings
+          # defaults to true), so build that GTK shell and its published
+          # headers into the same target out that produced flutter_tools' local
+          # engine artifacts.
+          #
+          # Mirror the host lane's sysroot header restore: the arm64 sysroot
+          # ships the GLib and GTK header sets but omits the generated
+          # per-architecture configuration headers (glibconfig.h, gdkconfig.h).
+          # Restore the arm64 packages' variants into the arm64 sysroot before
+          # compiling the GTK shell, using explicit multiarch paths so the
+          # x86-64 host headers never shadow them.
+          sudo apt-get install -y --no-install-recommends \
+            libglib2.0-dev:arm64 \
+            libgtk-3-dev:arm64
+          arm64_sysroot="$checkout_root/engine/src/build/linux/debian_bullseye_arm64-sysroot"
+          test -d "$arm64_sysroot"
+          glibconfig_src="/usr/lib/aarch64-linux-gnu/glib-2.0/include/glibconfig.h"
+          gdkconfig_src="/usr/lib/aarch64-linux-gnu/gtk-3.0/include/gdkconfig.h"
+          test -f "$glibconfig_src"
+          test -f "$gdkconfig_src"
+          for destination in \
+            "/usr/include/glib-2.0/glibconfig.h" \
+            "/usr/lib/glib-2.0/include/glibconfig.h" \
+            "/usr/lib/aarch64-linux-gnu/glib-2.0/include/glibconfig.h"; do
+            install -D -m 0644 "$glibconfig_src" "$arm64_sysroot$destination"
+          done
+          for destination in \
+            "/usr/include/gtk-3.0/gdk/gdkconfig.h" \
+            "/usr/include/gtk-3.0/gdkconfig.h" \
+            "/usr/lib/gtk-3.0/include/gdkconfig.h" \
+            "/usr/lib/aarch64-linux-gnu/gtk-3.0/include/gdkconfig.h"; do
+            install -D -m 0644 "$gdkconfig_src" "$arm64_sysroot$destination"
+          done
+
+          PATH="$checkout_depot/.cipd_bin:$checkout_depot:$PATH" \
+            DEPOT_TOOLS_UPDATE=0 \
+            VPYTHON_VIRTUALENV_ROOT="$engine_cache/vpython" \
+            /usr/bin/ninja \
+              -C "$output" \
+              -j "$(nproc)" \
+              libflutter_linux_gtk.so \
+              flutter/shell/platform/linux:publish_headers_linux
+          test -f "$output/libflutter_linux_gtk.so"
+          file "$output/libflutter_linux_gtk.so" | grep -qi aarch64 \
+            || { printf 'arm64 GTK engine is not AArch64\n' >&2; exit 1; }
+          test -f "$output/flutter_linux/flutter_linux.h"
+          printf 'AArch64 GTK engine built at %s\n' "$output/libflutter_linux_gtk.so"
+
+          # settings_app declares no plugins, so its registrant is the empty
+          # template. flutter assemble does not run injectPlugins (only a full
+          # linux build would), so emit the plugin-free registrant that the
+          # runner sources expect before compiling denial-settings.
+          install -d -m 0755 "$settings_app/linux/flutter"
+          cat >"$settings_app/linux/flutter/generated_plugin_registrant.h" <<'EOF'
+          //
+          //  Generated file. Do not edit.
+          //
+
+          // clang-format off
+
+          #ifndef GENERATED_PLUGIN_REGISTRANT_
+          #define GENERATED_PLUGIN_REGISTRANT_
+
+          #include <flutter_linux/flutter_linux.h>
+
+          // Registers Flutter plugins.
+          void fl_register_plugins(FlPluginRegistry* registry);
+
+          #endif  // GENERATED_PLUGIN_REGISTRANT_
+          EOF
+          cat >"$settings_app/linux/flutter/generated_plugin_registrant.cc" <<'EOF'
+          //
+          //  Generated file. Do not edit.
+          //
+
+          // clang-format off
+
+          #include "generated_plugin_registrant.h"
+
+          void fl_register_plugins(FlPluginRegistry* registry) {
+          }
+          EOF
+
+          install -d -m 0755 "$settings_assembly"
+          (
+            cd "$settings_app"
+            "$flutter_root" pub get
+            "$flutter_root" assemble \
+              --local-engine-src-path="$build_root" \
+              --local-engine=denial_arm64_release \
+              --local-engine-host=denial_host_release \
+              --suppress-analytics \
+              --resource-pool-size="$(nproc)" \
+              --output="$settings_assembly" \
+              -dTargetFile=lib/main.dart \
+              -dBuildMode=release \
+              -dTargetPlatform=linux-arm64 \
+              -dDartObfuscation=false \
+              -dTrackWidgetCreation=true \
+              -dTreeShakeIcons=true \
+              release_bundle_linux-arm64_assets
+          )
+          test -f "$settings_assembly/lib/libapp.so"
+          test -d "$settings_assembly/flutter_assets"
+          file "$settings_assembly/lib/libapp.so" | grep -qi aarch64 \
+            || { printf 'settings libapp.so is not AArch64\n' >&2; exit 1; }
+          printf 'AArch64 settings assembly ready at %s\n' "$settings_assembly"
+
+          install -d -m 0755 \
+            "$settings_bundle/lib" \
+            "$settings_bundle/data"
+          install -m 0644 \
+            "$settings_assembly/lib/libapp.so" \
+            "$settings_bundle/lib/libapp.so"
+          install -m 0644 \
+            "$output/libflutter_linux_gtk.so" \
+            "$settings_bundle/lib/libflutter_linux_gtk.so"
+          cp -a -- "$settings_assembly/flutter_assets" \
+            "$settings_bundle/data/flutter_assets"
+          test -f "$output/icudtl.dat"
+          [[ "$(stat -c %s "$output/icudtl.dat")" -gt 5000000 ]] \
+            || { printf 'engine out icudtl.dat is not the full runtime data set\n' >&2; exit 1; }
+          install -m 0644 \
+            "$output/icudtl.dat" \
+            "$settings_bundle/data/icudtl.dat"
+
+          # Cross-compile the settings GTK runner directly with the AArch64
+          # cross toolchain. A full `flutter build linux` is impossible here:
+          # flutter_tools still rejects x86-64 -> arm64 cross builds. Mirror the
+          # runner CMake: cxx_std_14, -Wall -Werror, -O3, NDEBUG for release,
+          # APPLICATION_ID, the project dir on the include path, a link against
+          # the arm64 GTK engine, and an $ORIGIN/lib runpath.
+          cross_pc="$(command -v pkg-config)"
+          gtk_cflags="$(
+            PKG_CONFIG_ALLOW_CROSS=1 \
+            PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
+            "$cross_pc" --cflags gtk+-3.0
+          )"
+          gtk_libs="$(
+            PKG_CONFIG_ALLOW_CROSS=1 \
+            PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
+            "$cross_pc" --libs gtk+-3.0
+          )"
+          aarch64-linux-gnu-g++ \
+            -std=c++14 -Wall -Werror -O3 -DNDEBUG \
+            -DAPPLICATION_ID='"dev.denial.Settings"' \
+            -I "$settings_app/linux" \
+            -I "$output" \
+            -pthread \
+            $gtk_cflags \
+            "$settings_app/linux/runner/main.cc" \
+            "$settings_app/linux/runner/settings_application.cc" \
+            "$settings_app/linux/flutter/generated_plugin_registrant.cc" \
+            -L "$output" \
+            -lflutter_linux_gtk \
+            $gtk_libs \
+            -Wl,-rpath,'$ORIGIN/lib' \
+            -o "$settings_bundle/denial-settings"
+          file "$settings_bundle/denial-settings" | grep -qi aarch64 \
+            || { printf 'denial-settings runner is not AArch64\n' >&2; exit 1; }
+          chmod 0755 "$settings_bundle/denial-settings"
+          printf 'AArch64 settings bundle assembled at %s\n' "$settings_bundle"
+
       - name: Assemble denial-flutter-engine AArch64 trial deb
         shell: bash
         run: |
@@ -934,27 +1120,42 @@ jobs:
           set -euo pipefail
           release_dir="$CARGO_TARGET_DIR/aarch64-unknown-linux-gnu/release"
           bundle_assembly="$RUNNER_TEMP/denial-arm64-bundle-assembly"
+          settings_bundle="$RUNNER_TEMP/denial-arm64-settings-bundle"
           package_version="0.0.0"
           package_release="1"
           work_root="$RUNNER_TEMP/denial-aarch64-package-build"
           arch_root="$work_root/arch-pkg"
           deb_root="$work_root/deb-pkg"
           packages_dir="$work_root/packages"
+          # The runtime version is derived from the newest reachable v* tag,
+          # mirroring how the release flow attributes a version to a tag.
+          runtime_version="$(
+            git tag --list 'v*' --sort=-v:refname | head -n 1 | sed 's/^v//'
+          )"
+          [[ "$runtime_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || runtime_version="$package_version"
           test -f "$bundle_assembly/lib/libapp.so"
           test -d "$bundle_assembly/flutter_assets"
+          test -d "$settings_bundle"
+          test -f "$settings_bundle/denial-settings"
+          test -d "$settings_bundle/data/flutter_assets"
           install -d -m 0755 "$packages_dir"
 
           install_runtime_payload() {
             local root="$1"
             install -d -m 0755 \
               "$root/usr/bin" \
+              "$root/usr/lib/denial" \
               "$root/usr/lib/denial/flutter/data" \
               "$root/usr/lib/denial/flutter/lib" \
+              "$root/usr/lib/denial/settings" \
               "$root/usr/lib/systemd/user" \
               "$root/usr/lib/systemd/system-sleep" \
               "$root/usr/lib/elogind/system-sleep" \
               "$root/etc/denial" \
               "$root/etc/xdg/xdg-desktop-portal-wlr" \
+              "$root/usr/share/applications" \
+              "$root/usr/share/denial" \
               "$root/usr/share/wayland-sessions" \
               "$root/usr/share/xdg-desktop-portal" \
               "$root/usr/share/xdg-desktop-portal/portals" \
@@ -962,6 +1163,8 @@ jobs:
               "$root/usr/share/man/man1" \
               "$root/usr/share/doc/denial" \
               "$root/usr/share/licenses/denial"
+            printf '%s\n' "$runtime_version" \
+              >"$root/usr/share/denial/version"
             install -m 0755 \
               "$release_dir/deniald" "$root/usr/bin/deniald"
             install -m 0755 \
@@ -977,6 +1180,16 @@ jobs:
             install -m 0755 \
               "$bundle_assembly/lib/libapp.so" \
               "$root/usr/lib/denial/flutter/lib/libapp.so"
+            cp -a -- "$settings_bundle/." \
+              "$root/usr/lib/denial/settings/"
+            chmod -R u=rwX,go=rX \
+              "$root/usr/lib/denial/settings"
+            chmod 0755 "$root/usr/lib/denial/settings/denial-settings"
+            ln -sfn ../lib/denial/settings/denial-settings \
+              "$root/usr/bin/denial-settings"
+            install -m 0644 \
+              packaging/arch/dev.denial.Settings.desktop \
+              "$root/usr/share/applications/dev.denial.Settings.desktop"
             install -m 0644 \
               packaging/denial-session.target \
               "$root/usr/lib/systemd/user/denial-session.target"
