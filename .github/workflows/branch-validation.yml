@@ -998,15 +998,15 @@ jobs:
           # the lock-pinned engine's AArch64 Debian sysroot rather than any
           # :arm64 host package, so the runner is built against the same GLib
           # and GTK the GTK engine shell itself was cross-compiled against and
-          # no arm64 host dev package is required. The cross g++ does not add
-          # the sysroot's glibc multiarch header directory itself (the engine
-          # relies on clang + --sysroot for that), so put
-          # usr/include/aarch64-linux-gnu on the include path to satisfy the
-          # bits/signum.h-style glibc headers the sysroot GLib/GTK headers pull
-          # in.
-          arm64_multiarch_include="$arm64_sysroot/usr/include/aarch64-linux-gnu"
-          test -d "$arm64_multiarch_include" \
-            || { printf 'missing AArch64 multiarch include dir in sysroot\n' >&2; exit 1; }
+          # no arm64 host dev package is required. The sysroot is a Debian
+          # rootfs for the engine's clang build, so some pkg-config files
+          # (zlib, and through it others) leak a bare -I<sysroot>/usr/include
+          # that drags in the sysroot's trimmed glibc header set, whose
+          # bits/signum.h-style multiarch headers are incomplete. Stripping
+          # that bare path makes every libc include resolve from the cross
+          # g++'s own complete AArch64 glibc headers while the GTK/GLib
+          # package subdirectories (and the restored glibconfig/gdkconfig)
+          # still come from the sysroot.
           arm64_pc_dirs=()
           for arm64_pc_dir in \
             "$arm64_sysroot/usr/lib/aarch64-linux-gnu/pkgconfig" \
@@ -1029,18 +1029,23 @@ jobs:
             PKG_CONFIG_PATH="$arm64_pc_path" \
             "$cross_pc" "$@"
           }
-          if gtk_cflags="$(gtk_pc_flags --cflags gtk+-3.0 json-glib-1.0)"; then
-            gtk_libs="$(gtk_pc_flags --libs gtk+-3.0 json-glib-1.0)"
-          else
-            gtk_cflags="$(gtk_pc_flags --cflags gtk+-3.0)"
-            gtk_libs="$(gtk_pc_flags --libs gtk+-3.0)"
+          gtk_modules=(gtk+-3.0)
+          if gtk_pc_flags --exists json-glib-1.0; then
+            gtk_modules+=(json-glib-1.0)
           fi
+          gtk_cflags="$(gtk_pc_flags --cflags "${gtk_modules[@]}")"
+          gtk_libs="$(gtk_pc_flags --libs "${gtk_modules[@]}")"
+          gtk_cflags="$(
+            printf '%s\n' "$gtk_cflags" \
+              | tr ' ' '\n' \
+              | grep -Fxv -- "-I$arm64_sysroot/usr/include" \
+              | paste -sd ' ' -
+          )"
           aarch64-linux-gnu-g++ \
             -std=c++14 -Wall -Werror -O3 -DNDEBUG \
             -DAPPLICATION_ID='"dev.denial.Settings"' \
             -I "$settings_app/linux" \
             -I "$output" \
-            -I "$arm64_multiarch_include" \
             -pthread \
             $gtk_cflags \
             "$settings_app/linux/runner/main.cc" \
