@@ -122,6 +122,8 @@ final class BridgeEventsClient {
           wire.ShellActionKind.FocusRight => DenialShellAction.focusRight,
           wire.ShellActionKind.FocusUp => DenialShellAction.focusUp,
           wire.ShellActionKind.FocusDown => DenialShellAction.focusDown,
+          wire.ShellActionKind.ScreenshotCaptured =>
+            DenialShellAction.screenshotCaptured,
         };
         if (!_shellActions.isClosed) {
           _shellActions.add(

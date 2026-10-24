@@ -360,6 +360,7 @@ pub enum ShellAction {
     FocusRight,
     FocusUp,
     FocusDown,
+    ScreenshotCaptured,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -397,6 +398,7 @@ impl ShellAction {
             Self::FocusRight => fb::ShellActionKind::FocusRight,
             Self::FocusUp => fb::ShellActionKind::FocusUp,
             Self::FocusDown => fb::ShellActionKind::FocusDown,
+            Self::ScreenshotCaptured => fb::ShellActionKind::ScreenshotCaptured,
         }
     }
 }

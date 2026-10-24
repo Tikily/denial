@@ -19,6 +19,9 @@ enum DenialShellAction {
   focusRight,
   focusUp,
   focusDown,
+
+  /// deniald captured a full-screen screenshot (Power plus Volume Down).
+  screenshotCaptured,
 }
 
 class DenialShellActionEvent {

@@ -100,7 +100,9 @@ enum ShellActionKind : ubyte {
   FocusLeft = 14,
   FocusRight = 15,
   FocusUp = 16,
-  FocusDown = 17
+  FocusDown = 17,
+  // A full-screen screenshot was just captured; the shell may show it.
+  ScreenshotCaptured = 18
 }
 
 enum KeyboardCommandKind : ubyte {

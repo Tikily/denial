@@ -502,7 +502,9 @@ pub(crate) fn dispatch_shell_keyboard(
             true
         }
         super::super::wire::KeyboardCommand::Text(text)
-            if text.chars().any(|character| shell_text_key_stroke(character).is_none()) =>
+            if text
+                .chars()
+                .any(|character| shell_text_key_stroke(character).is_none()) =>
         {
             // The keymap types ASCII only; an editor takes any text.
             let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
@@ -1779,12 +1781,41 @@ fn process_input_event(
         // KEY_POWER (116) plus the XKB offset. Handle the entire physical key
         // sequence before note_user_activity: waking first would invert an
         // off-to-on toggle, and routing the release would undo on-to-off.
+        // Power plus Volume Down is the mobile shell's screenshot.
+        let chords = state
+            .wayland
+            .as_ref()
+            .is_some_and(|frontend| frontend.mobile_shell);
         if key_event.key_code().raw() == 116 + 8 {
             state.power_button.note_key(
                 key_event.device().sysname(),
                 key_event.state() == KeyState::Pressed,
+                chords,
             );
             return false;
+        }
+        // KEY_VOLUMEDOWN (114).
+        if key_event.key_code().raw() == 114 + 8 {
+            use super::super::idle_policy::VolumeDownRoute;
+            let keycode = key_event.key_code();
+            match state
+                .power_button
+                .note_volume_down(key_event.state() == KeyState::Pressed, chords)
+            {
+                VolumeDownRoute::Deliver => {}
+                VolumeDownRoute::Take => return false,
+                VolumeDownRoute::HoldBack => {
+                    hold_back_volume_down(state, keycode);
+                    return false;
+                }
+                VolumeDownRoute::DeliverHeldPress => {
+                    let time = key_event.time();
+                    let pressed =
+                        process_keyboard_transition(state, keycode, KeyState::Pressed, time);
+                    return process_keyboard_transition(state, keycode, KeyState::Released, time)
+                        || pressed;
+                }
+            }
         }
         return process_keyboard_transition(
             state,
@@ -2249,6 +2280,38 @@ pub(super) fn leave_focused_flutter_keyboard(state: &mut RuntimeState) {
             &modifiers,
             0,
         );
+    }
+}
+
+/// How long a Volume Down press waits for Power to join it as a
+/// screenshot before it changes the volume.
+#[cfg(feature = "flutter")]
+const SCREENSHOT_CHORD_WINDOW: std::time::Duration = std::time::Duration::from_millis(150);
+
+#[cfg(feature = "flutter")]
+fn hold_back_volume_down(state: &mut RuntimeState, keycode: Keycode) {
+    let Some(frontend) = state.wayland.as_ref() else {
+        return;
+    };
+    let loop_handle = frontend.loop_handle.clone();
+    let scheduled = loop_handle.insert_source(
+        Timer::from_duration(SCREENSHOT_CHORD_WINDOW),
+        move |_, _, state| {
+            if state.power_button.take_held_volume_down()
+                && process_keyboard_transition(state, keycode, KeyState::Pressed, InputTime::now())
+                && let Some(frontend) = state.wayland.as_mut()
+                && let Err(error) = frontend.display_handle.flush_clients()
+            {
+                warn!(%error, "could not flush Wayland clients after Volume Down");
+            }
+            TimeoutAction::Drop
+        },
+    );
+    if let Err(error) = scheduled {
+        warn!(%error, "could not hold Volume Down back for the screenshot chord");
+        if state.power_button.take_held_volume_down() {
+            process_keyboard_transition(state, keycode, KeyState::Pressed, InputTime::now());
+        }
     }
 }
 

@@ -141,6 +141,9 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
         }
       case DenialShellAction.screenshotDone:
         ref.read(screenshotSelectionProvider.notifier).done(event.requestId);
+      case DenialShellAction.screenshotCaptured:
+        // The mobile shell's flash; the desktop shows nothing.
+        break;
       case DenialShellAction.clientPointerPressed:
         dismissOpenSystemTrayMenu(ref);
       case DenialShellAction.wallpaper:

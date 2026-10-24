@@ -487,10 +487,12 @@ fn handle_screenshot_request(
             .ok_or("live screenshot atlas has no outputs")?
             .id;
         let modifier = screenshot_buffer_modifier(scheduler, output_swapchains, source_output)?;
-        if let Err(error) =
-            manager.capture_live(renderer, allocator, &atlas, modifier, &mut sources, request)
-        {
-            warn!(%error, "screenshot capture failed");
+        match manager.capture_live(renderer, allocator, &atlas, modifier, &mut sources, request) {
+            // The pixels are copied: feedback the shell shows now is not in them.
+            Ok(()) => {
+                runtime.send_shell_action(wire::ShellAction::ScreenshotCaptured, None, None)?
+            }
+            Err(error) => warn!(%error, "screenshot capture failed"),
         }
         return Ok(());
     }
@@ -3075,7 +3077,14 @@ pub(super) fn run_flutter_event_loop(
         }
         let screenshot_prepared = runtime.take_screenshot_prepared();
         let screenshot_cancelled = runtime.take_screenshot_cancelled();
-        let screenshot_request = runtime.take_screenshot_requested();
+        let screenshot_request = runtime.take_screenshot_requested().or_else(|| {
+            std::mem::take(&mut events.screenshot_requested).then_some(
+                flutter_runtime::system_command::ScreenshotRequest {
+                    request_id: None,
+                    region: None,
+                },
+            )
+        });
         if runtime.take_logout_requested() {
             info!("Flutter requested session logout");
             break;

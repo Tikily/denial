@@ -153,7 +153,23 @@ pub(super) fn synchronize_wake_gestures(scanouts: &[Scanout], events: &mut Runti
 
 #[cfg(feature = "flutter")]
 pub(super) fn synchronize_power_button(scanouts: &[Scanout], events: &mut RuntimeState) {
-    if !events.power_button.take_toggle() {
+    if events.power_button.take_screenshot() {
+        events.screenshot_requested = true;
+    }
+    // In the mobile shell a lit screen goes dark on release, so Volume Down
+    // can still make the press a screenshot. A dark screen wakes at once.
+    let mobile = events
+        .wayland
+        .as_ref()
+        .is_some_and(|frontend| frontend.mobile_shell());
+    let lit = scanouts.iter().any(|scanout| {
+        events
+            .output_power_requests
+            .get(&scanout.output.id)
+            .copied()
+            .unwrap_or(scanout.powered)
+    });
+    if !events.power_button.take_toggle(mobile && lit) {
         return;
     }
     let action = events.idle_policy.power_button_action();

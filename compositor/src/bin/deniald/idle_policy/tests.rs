@@ -151,26 +151,118 @@ fn power_button_system_actions_map_to_logind_methods() {
 #[test]
 fn power_button_toggles_once_per_press_and_consumes_release() {
     let mut button = PowerButton::default();
-    button.note_key("pmic", true);
-    assert!(button.take_toggle());
-    button.note_key("pmic", true);
-    button.note_key("pmic", false);
-    assert!(!button.take_toggle());
-    button.note_key("pmic", true);
-    assert!(button.take_toggle());
+    button.note_key("pmic", true, false);
+    assert!(button.take_toggle(false));
+    button.note_key("pmic", true, false);
+    button.note_key("pmic", false, false);
+    assert!(!button.take_toggle(false));
+    button.note_key("pmic", true, false);
+    assert!(button.take_toggle(false));
     button.remove_device("pmic");
-    button.note_key("pmic", true);
-    assert!(button.take_toggle());
+    button.note_key("pmic", true, false);
+    assert!(button.take_toggle(false));
 }
 
 #[test]
 fn two_power_presses_in_one_dispatch_leave_power_unchanged() {
     let mut button = PowerButton::default();
     for _ in 0..2 {
-        button.note_key("pmic", true);
-        button.note_key("pmic", false);
+        button.note_key("pmic", true, false);
+        button.note_key("pmic", false, false);
     }
-    assert!(!button.take_toggle());
+    assert!(!button.take_toggle(false));
+}
+
+#[test]
+fn power_then_volume_down_takes_a_screenshot_instead_of_the_toggle() {
+    let mut button = PowerButton::default();
+    button.note_key("pmic", true, true);
+    assert!(!button.take_toggle(true), "waits for the release");
+    assert_eq!(button.note_volume_down(true, true), VolumeDownRoute::Take);
+    assert!(button.take_screenshot());
+    button.note_key("pmic", false, true);
+    assert!(!button.take_toggle(true));
+    assert_eq!(button.note_volume_down(false, true), VolumeDownRoute::Take);
+    assert!(!button.take_screenshot());
+}
+
+#[test]
+fn volume_down_then_power_takes_a_screenshot_and_no_volume_step() {
+    let mut button = PowerButton::default();
+    assert_eq!(
+        button.note_volume_down(true, true),
+        VolumeDownRoute::HoldBack
+    );
+    button.note_key("pmic", true, true);
+    assert!(button.take_screenshot());
+    assert!(
+        !button.take_held_volume_down(),
+        "the press never reaches the seat"
+    );
+    button.note_key("pmic", false, true);
+    assert!(!button.take_toggle(true));
+    assert_eq!(button.note_volume_down(false, true), VolumeDownRoute::Take);
+}
+
+#[test]
+fn held_back_volume_down_is_delivered_when_power_does_not_follow() {
+    let mut button = PowerButton::default();
+    assert_eq!(
+        button.note_volume_down(true, true),
+        VolumeDownRoute::HoldBack
+    );
+    assert!(button.take_held_volume_down());
+    assert_eq!(
+        button.note_volume_down(false, true),
+        VolumeDownRoute::Deliver
+    );
+
+    // A quick tap releases before the wait ends.
+    assert_eq!(
+        button.note_volume_down(true, true),
+        VolumeDownRoute::HoldBack
+    );
+    assert_eq!(
+        button.note_volume_down(false, true),
+        VolumeDownRoute::DeliverHeldPress
+    );
+    assert!(!button.take_held_volume_down());
+
+    // Power after the press went through: a screenshot, the keys stay volume.
+    assert_eq!(
+        button.note_volume_down(true, true),
+        VolumeDownRoute::HoldBack
+    );
+    assert!(button.take_held_volume_down());
+    button.note_key("pmic", true, true);
+    assert!(button.take_screenshot());
+    button.note_key("pmic", false, true);
+    assert_eq!(
+        button.note_volume_down(false, true),
+        VolumeDownRoute::Deliver
+    );
+}
+
+#[test]
+fn power_alone_toggles_on_release_with_chords_and_volume_stays_volume() {
+    let mut button = PowerButton::default();
+    button.note_key("pmic", true, true);
+    button.note_key("pmic", false, true);
+    assert!(button.take_toggle(true));
+    assert!(!button.take_screenshot());
+
+    // Without chords, Volume Down never waits or joins Power.
+    button.note_key("pmic", true, false);
+    assert_eq!(
+        button.note_volume_down(true, false),
+        VolumeDownRoute::Deliver
+    );
+    assert!(button.take_toggle(false));
+    assert!(!button.take_screenshot());
+    assert_eq!(
+        button.note_volume_down(false, false),
+        VolumeDownRoute::Deliver
+    );
 }
 
 #[test]

@@ -76,6 +76,11 @@ impl WaylandFrontend {
         }
     }
 
+    #[cfg(feature = "flutter")]
+    pub(crate) fn mobile_shell(&self) -> bool {
+        self.mobile_shell
+    }
+
     /// Whether the window rooted at `root` shows its kept frame instead of
     /// its committed buffers.
     pub(super) fn window_frozen(&self, root: &ObjectId) -> bool {

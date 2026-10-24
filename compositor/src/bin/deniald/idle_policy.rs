@@ -352,29 +352,99 @@ fn decode_timeout(
 
 /// Physical power keys are consumed before ordinary input-to-wake handling.
 /// Releases and duplicate presses must never reverse the requested transition.
+/// With `chords` (the mobile shell), Power and Volume Down together, in
+/// either order, take a screenshot instead.
 #[derive(Default)]
 pub(super) struct PowerButton {
     held_devices: BTreeSet<String>,
     toggle_pending: bool,
+    volume_down_held: bool,
+    /// Volume Down's press waits for Power, which may follow at once.
+    volume_down_held_back: bool,
+    /// Volume Down's press went to a screenshot, so its release does too.
+    volume_down_taken: bool,
+    screenshot_requested: bool,
+}
+
+/// Where a Volume Down transition goes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum VolumeDownRoute {
+    /// To the seat, as usual.
+    Deliver,
+    /// Nowhere: it is part of a screenshot.
+    Take,
+    /// Nowhere yet: Power may follow. Deliver the press once
+    /// `take_held_volume_down` says it still waits.
+    HoldBack,
+    /// A release while the press waited: deliver the press, then this.
+    DeliverHeldPress,
 }
 
 impl PowerButton {
-    pub(super) fn note_key(&mut self, device: &str, pressed: bool) {
+    pub(super) fn note_key(&mut self, device: &str, pressed: bool, chords: bool) {
         if pressed {
             if self.held_devices.insert(device.to_owned()) {
-                self.toggle_pending = !self.toggle_pending;
+                if chords && self.volume_down_held {
+                    self.screenshot_requested = true;
+                    // A press that still waits never reaches the seat.
+                    self.volume_down_taken = std::mem::take(&mut self.volume_down_held_back);
+                } else {
+                    self.toggle_pending = !self.toggle_pending;
+                }
             }
         } else {
             self.held_devices.remove(device);
         }
     }
 
+    pub(super) fn note_volume_down(&mut self, pressed: bool, chords: bool) -> VolumeDownRoute {
+        if !pressed {
+            self.volume_down_held = false;
+            if std::mem::take(&mut self.volume_down_taken) {
+                return VolumeDownRoute::Take;
+            }
+            if std::mem::take(&mut self.volume_down_held_back) {
+                return VolumeDownRoute::DeliverHeldPress;
+            }
+            return VolumeDownRoute::Deliver;
+        }
+        self.volume_down_held = true;
+        if !chords {
+            return VolumeDownRoute::Deliver;
+        }
+        if !self.held_devices.is_empty() {
+            // Power's toggle waits for its release; the chord cancels it.
+            self.toggle_pending = false;
+            self.screenshot_requested = true;
+            self.volume_down_taken = true;
+            return VolumeDownRoute::Take;
+        }
+        self.volume_down_held_back = true;
+        VolumeDownRoute::HoldBack
+    }
+
+    /// Power did not follow: whether the held press still waits, now to be
+    /// delivered.
+    pub(super) fn take_held_volume_down(&mut self) -> bool {
+        std::mem::take(&mut self.volume_down_held_back)
+    }
+
     pub(super) fn remove_device(&mut self, device: &str) {
         self.held_devices.remove(device);
     }
 
-    pub(super) fn take_toggle(&mut self) -> bool {
+    /// The toggle a press asked for. With `wait_for_release` it comes only
+    /// once the button is up, so Volume Down can still turn it into a
+    /// screenshot.
+    pub(super) fn take_toggle(&mut self, wait_for_release: bool) -> bool {
+        if wait_for_release && !self.held_devices.is_empty() {
+            return false;
+        }
         std::mem::take(&mut self.toggle_pending)
+    }
+
+    pub(super) fn take_screenshot(&mut self) -> bool {
+        std::mem::take(&mut self.screenshot_requested)
     }
 }
 

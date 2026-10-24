@@ -113,6 +113,9 @@ pub(super) struct RuntimeState {
     pub(super) pending_system_control_waits: VecDeque<PendingSystemControlWait>,
     #[cfg(feature = "flutter")]
     pub(super) pending_orientation: Option<orientation_sensor::Orientation>,
+    /// Power plus Volume Down asked for a full-screen screenshot.
+    #[cfg(feature = "flutter")]
+    pub(super) screenshot_requested: bool,
     #[cfg(feature = "flutter")]
     pub(super) text_prediction: Option<text_prediction::TextPredictionService>,
     #[cfg(feature = "flutter")]
