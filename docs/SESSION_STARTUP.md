@@ -27,7 +27,10 @@ desktop entries from `$XDG_CONFIG_HOME/autostart` and the `autostart` child of
 every directory in `$XDG_CONFIG_DIRS` only after Denial is ready. Entries can
 target Denial with `OnlyShowIn=Denial;`. Denial stops the graphical-session
 target on shutdown, and the launcher provides a cleanup fallback after the
-compositor process exits.
+compositor process exits. It also restores the systemd user-manager environment
+that preceded Denial, so its display, desktop, cursor and Qt platform-theme
+values do not reach a later graphical session while the same user manager
+remains alive.
 
 The D-Bus-activated `denial-portal.service` is part of that target. It connects
 to deniald's private appearance-state socket before owning the Settings portal

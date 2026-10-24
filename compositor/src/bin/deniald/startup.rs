@@ -791,7 +791,7 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
     }
 
     let gamma_control = Arc::new(Mutex::new(gamma_control::GammaController::default()));
-    let mut graphical_session_started = false;
+    let mut systemd_environment_restore = None;
     let runtime_outcome = catch_unwind(AssertUnwindSafe(|| -> Result<_, Box<dyn Error>> {
         for scanout in &kms.scanouts {
             let (_, state) = current_scanout_state(scanout, &swapchains)?;
@@ -817,7 +817,7 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
                 None,
                 options.polkit_agent,
             ) {
-                Ok(activation) => graphical_session_started = activation.starts_systemd_target(),
+                Ok(activation) => systemd_environment_restore = activation.into_systemd_restore(),
                 Err(error) => {
                     warn!(%error, "could not activate the compositor session environment")
                 }
@@ -827,7 +827,7 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
         // This starts its backend only; the agent opens UI on a Polkit challenge.
         #[cfg(feature = "flutter")]
         if runtime_limit == RuntimeLimit::UntilLogout
-            && !graphical_session_started
+            && systemd_environment_restore.is_none()
             && wayland.is_some()
             && options.polkit_agent
             && std::env::var("DENIAL_POLKIT_AGENT").as_deref() != Ok("0")
@@ -1003,8 +1003,10 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
     let mut restore_failures = restore.failures;
     restore_failures.extend(gamma_restore_failures);
 
-    if graphical_session_started && let Err(error) = stop_systemd_graphical_session() {
-        warn!(%error, "could not stop the Denial graphical-session target");
+    if let Some(restore) = systemd_environment_restore.as_ref()
+        && let Err(error) = stop_systemd_graphical_session(restore)
+    {
+        warn!(%error, "could not stop the Denial graphical-session target and restore its activation environment");
     }
 
     match runtime_outcome {
