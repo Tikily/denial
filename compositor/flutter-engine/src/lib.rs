@@ -152,7 +152,10 @@ pub enum LoadError {
         path: PathBuf,
         source: libloading::Error,
     },
-    Symbol(libloading::Error),
+    Symbol {
+        name: &'static CStr,
+        source: libloading::Error,
+    },
     ProcTable(sys::FlutterEngineResult),
     MissingProc(&'static str),
 }
@@ -163,10 +166,11 @@ impl fmt::Display for LoadError {
             Self::Library { path, source } => {
                 write!(formatter, "could not load {}: {source}", path.display())
             }
-            Self::Symbol(source) => {
+            Self::Symbol { name, source } => {
                 write!(
                     formatter,
-                    "required Flutter engine symbol is unavailable: {source}"
+                    "required Flutter engine symbol {} is unavailable: {source}",
+                    name.to_string_lossy()
                 )
             }
             Self::ProcTable(result) => {
@@ -180,7 +184,7 @@ impl fmt::Display for LoadError {
 impl Error for LoadError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Library { source, .. } | Self::Symbol(source) => Some(source),
+            Self::Library { source, .. } | Self::Symbol { source, .. } => Some(source),
             Self::ProcTable(_) | Self::MissingProc(_) => None,
         }
     }
@@ -302,6 +306,16 @@ pub struct EngineLibrary {
     _library: Library,
 }
 
+/// # Safety
+///
+/// `T` must be the exact type of the item `name` exports.
+unsafe fn required_symbol<T: Copy>(library: &Library, name: &'static CStr) -> Result<T, LoadError> {
+    // SAFETY: the caller supplies the declared type of `name`.
+    unsafe { library.get::<T>(name.to_bytes_with_nul()) }
+        .map(|symbol| *symbol)
+        .map_err(|source| LoadError::Symbol { name, source })
+}
+
 impl EngineLibrary {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, LoadError> {
         let path = path.as_ref();
@@ -316,31 +330,27 @@ impl EngineLibrary {
         // SAFETY: the symbol name and signature come from the versioned
         // Flutter embedder bindings generated for this engine revision.
         let get_proc_addresses = unsafe {
-            *library
-                .get::<GetProcAddresses>(b"FlutterEngineGetProcAddresses\0")
-                .map_err(LoadError::Symbol)?
+            required_symbol::<GetProcAddresses>(&library, c"FlutterEngineGetProcAddresses")?
         };
         type RequestFrameForExternalTextures =
             unsafe extern "C" fn(sys::FlutterEngine) -> sys::FlutterEngineResult;
         // SAFETY: this Denial-specific symbol is declared by the versioned
         // embedder header shipped with our coupled Flutter engine.
         let request_frame_for_external_textures = unsafe {
-            *library
-                .get::<RequestFrameForExternalTextures>(
-                    b"DenialFlutterEngineRequestFrameForExternalTextures\0",
-                )
-                .map_err(LoadError::Symbol)?
+            required_symbol::<RequestFrameForExternalTextures>(
+                &library,
+                c"DenialFlutterEngineRequestFrameForExternalTextures",
+            )?
         };
         type ScheduleFrameForExternalTextures =
             unsafe extern "C" fn(sys::FlutterEngine, *const i64, usize) -> sys::FlutterEngineResult;
         // SAFETY: this Denial-specific symbol is declared by the versioned
         // embedder header shipped with our coupled Flutter engine.
         let schedule_frame_for_external_textures = unsafe {
-            *library
-                .get::<ScheduleFrameForExternalTextures>(
-                    b"DenialFlutterEngineScheduleFrameForExternalTextures\0",
-                )
-                .map_err(LoadError::Symbol)?
+            required_symbol::<ScheduleFrameForExternalTextures>(
+                &library,
+                c"DenialFlutterEngineScheduleFrameForExternalTextures",
+            )?
         };
         type RenderOutputs = unsafe extern "C" fn(
             sys::FlutterEngine,
@@ -355,9 +365,7 @@ impl EngineLibrary {
         // SAFETY: this Denial-specific symbol is declared by the versioned
         // embedder header shipped with our coupled Flutter engine.
         let render_outputs = unsafe {
-            *library
-                .get::<RenderOutputs>(b"DenialFlutterEngineRenderOutputs\0")
-                .map_err(LoadError::Symbol)?
+            required_symbol::<RenderOutputs>(&library, c"DenialFlutterEngineRenderOutputs")?
         };
         // SAFETY: this additive extension has the signature above. Keeping it
         // optional lets an isolated engine experiment retain the pinned ABI.
@@ -377,9 +385,7 @@ impl EngineLibrary {
         // SAFETY: this Denial-specific symbol is declared by the versioned
         // embedder header shipped with our coupled Flutter engine.
         let set_render_outputs = unsafe {
-            *library
-                .get::<SetRenderOutputs>(b"DenialFlutterEngineSetRenderOutputs\0")
-                .map_err(LoadError::Symbol)?
+            required_symbol::<SetRenderOutputs>(&library, c"DenialFlutterEngineSetRenderOutputs")?
         };
         type SetExternalTextureGlStateCallback = unsafe extern "C" fn(
             sys::FlutterEngine,
@@ -390,20 +396,18 @@ impl EngineLibrary {
         // SAFETY: this callback registration is part of Denial's versioned
         // engine extension and is loaded from the same retained library.
         let set_external_texture_gl_state_callback = unsafe {
-            *library
-                .get::<SetExternalTextureGlStateCallback>(
-                    b"DenialFlutterEngineSetExternalTextureGlStateCallback\0",
-                )
-                .map_err(LoadError::Symbol)?
+            required_symbol::<SetExternalTextureGlStateCallback>(
+                &library,
+                c"DenialFlutterEngineSetExternalTextureGlStateCallback",
+            )?
         };
         // SAFETY: this extension has the C layout declared above and remains
         // loaded with the same engine library for the entire host lifetime.
         let set_texture_presentation_callback = unsafe {
-            *library
-                .get::<SetTexturePresentationCallback>(
-                    b"DenialFlutterEngineSetExternalTexturePresentationCallback\0",
-                )
-                .map_err(LoadError::Symbol)?
+            required_symbol::<SetTexturePresentationCallback>(
+                &library,
+                c"DenialFlutterEngineSetExternalTexturePresentationCallback",
+            )?
         };
         // SAFETY: the C API explicitly requires a zero-initialized table with
         // only `struct_size` populated before the call.
