@@ -214,7 +214,8 @@ stdenvNoCC.mkDerivation (finalAttrs: {
 
     install -Dm755 ${compositor}/bin/deniald $out/bin/deniald
     install -Dm755 ${compositor}/bin/denialctl $out/bin/denialctl
-    install -Dm755 ${compositor}/bin/denial-portal $out/bin/denial-portal
+    makeWrapper ${compositor}/bin/denial-portal $out/bin/denial-portal \
+      --add-flags "--dialog-bundle $out/lib/denial/polkit"
     install -Dm755 ${packageSrc}/packaging/arch/denial-session $out/bin/denial-session
     patchShebangs $out/bin/denial-session
 

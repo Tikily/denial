@@ -223,6 +223,8 @@ mod touch_gestures;
 mod window_layout_adapter;
 #[cfg(feature = "flutter")]
 pub(crate) use window_layout_adapter::LayoutDropTarget;
+#[path = "wayland_frontend/shortcuts_inhibit.rs"]
+mod shortcuts_inhibit;
 #[path = "wayland_frontend/window_management.rs"]
 mod window_management;
 #[cfg(feature = "flutter")]
@@ -648,6 +650,7 @@ pub(super) struct WaylandFrontend {
     #[cfg(feature = "flutter")]
     idle_notifier: smithay::wayland::idle_notify::IdleNotifierState<RuntimeState>,
     output_power: OutputPowerManager,
+    shortcuts_inhibit: shortcuts_inhibit::ShortcutsInhibit,
     input_timestamps: input_timestamps::InputTimestamps,
     gamma_control: gamma_control::GammaControlManager,
     screencopy: screencopy::ScreencopyManager,

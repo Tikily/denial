@@ -34,6 +34,7 @@ import 'widgets/settings_lock_screen_page.dart';
 import 'widgets/settings_navigation.dart';
 import 'widgets/settings_page_chrome.dart';
 import 'widgets/settings_overlays_page.dart';
+import 'widgets/settings_permissions_page.dart';
 import 'widgets/settings_power_page.dart';
 import 'widgets/settings_shortcuts_page.dart';
 import 'widgets/settings_system_pages.dart';
@@ -318,6 +319,11 @@ class _SettingsPageBody extends ConsumerWidget {
           return const SizedBox.shrink();
         }
         return const SettingsFingerprintPage();
+      case SettingsPageId.permissions:
+        final applications = ref.watch(settingsDesktopApplicationsProvider);
+        return SettingsPermissionsPage(
+          applications: applications.asData?.value ?? const <DesktopApp>[],
+        );
       case SettingsPageId.appearance:
         final settings = ref.watch(
           shellSettingsProvider.select((settings) => settings.appearance),

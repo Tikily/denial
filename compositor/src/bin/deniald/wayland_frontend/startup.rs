@@ -50,6 +50,8 @@ impl WaylandFrontend {
         #[cfg(feature = "flutter")]
         let idle_notifier = idle_notify::new(&display_handle, loop_handle.clone());
         let output_power = OutputPowerManager::new(&display_handle);
+        let shortcuts_inhibit =
+            shortcuts_inhibit::ShortcutsInhibit::new(&display_handle, &loop_handle)?;
         let input_timestamps = input_timestamps::InputTimestamps::new(&display_handle);
         let gamma_control = gamma_control::GammaControlManager::new(&display_handle);
         let screencopy = screencopy::ScreencopyManager::new(&display_handle);
@@ -498,6 +500,7 @@ impl WaylandFrontend {
             #[cfg(feature = "flutter")]
             idle_notifier,
             output_power,
+            shortcuts_inhibit,
             input_timestamps,
             gamma_control,
             screencopy,

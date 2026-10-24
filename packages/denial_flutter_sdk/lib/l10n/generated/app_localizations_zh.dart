@@ -4192,6 +4192,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get polkitLocked => '已暂时锁定';
 
   @override
+  String get accessAllow => '允许';
+
+  @override
+  String get accessAllowOnce => '仅允许这一次';
+
+  @override
+  String get accessAlwaysAllow => '始终允许';
+
+  @override
+  String get accessDecline => '拒绝';
+
+  @override
+  String get accessNeverAllow => '始终拒绝';
+
+  @override
+  String get accessDeclineOnce => '仅拒绝这一次';
+
+  @override
+  String get accessUnknownApp => '某个应用';
+
+  @override
   String get pluginsAppTitle => 'Denial 插件';
 
   @override
@@ -4846,4 +4867,38 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get timeAfternoon => '下午';
+
+  @override
+  String get settingsNavigationPermissions => '权限';
+
+  @override
+  String get settingsPermissionsSection => '权限';
+
+  @override
+  String get settingsPermissionsTitle => '选择应用可以做什么。应用提出请求后会出现在这里。';
+
+  @override
+  String get settingsPermissionsKeyboardShortcutsTitle => '键盘快捷键';
+
+  @override
+  String get settingsPermissionsKeyboardShortcutsDescription =>
+      '获得焦点时，被允许的应用会接收 Denial 自身快捷键所用的按键，例如 Super。';
+
+  @override
+  String get settingsPermissionsNone => '还没有应用提出请求。';
+
+  @override
+  String get settingsPermissionsUnavailable => '无法读取权限：门户权限存储不可用。';
+
+  @override
+  String get settingsPermissionsSaveFailed => '无法保存更改。';
+
+  @override
+  String get settingsPermissionAsk => '询问';
+
+  @override
+  String get settingsPermissionAllow => '始终允许';
+
+  @override
+  String get settingsPermissionDeny => '始终拒绝';
 }

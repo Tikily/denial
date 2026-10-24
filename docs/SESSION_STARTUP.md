@@ -36,7 +36,8 @@ The D-Bus-activated `denial-portal.service` is part of that target. It connects
 to deniald's private appearance-state socket before owning the Settings portal
 bus name, then stops when the compositor disconnects. XDG desktop portal
 routing selects it for `org.freedesktop.impl.portal.Settings` with GTK as the
-fallback for keys Denial does not implement. No portal process is placed on
+fallback for keys Denial does not implement, and for
+`org.freedesktop.impl.portal.Access` with GTK as the fallback. No portal process is placed on
 the compositor render or input path.
 
 On a system without a systemd user manager, such as a runit system using

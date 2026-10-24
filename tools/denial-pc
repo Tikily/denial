@@ -126,6 +126,8 @@ SESSION_ENGINE_SHA256=""
 BINARY="${DENIAL_PC_BINARY:-$RUST_TARGET/release/deniald}"
 CONTROL_BINARY="${DENIAL_PC_CONTROL_BINARY:-$RUST_TARGET/release/denialctl}"
 PORTAL_BINARY="${DENIAL_PC_PORTAL_BINARY:-$RUST_TARGET/release/denial-portal}"
+# The Polkit dialog bundle also draws the portal's Access requests.
+DIALOG_BUNDLE="$ROOT/polkit_app/build/linux/$DENIAL_FLUTTER_ARCH/release/bundle"
 OUTPUT_CONFIG="${DENIAL_PC_OUTPUT_CONFIG:-$ROOT/dev/denial-outputs.conf}"
 DRM_DEVICE="${DENIAL_PC_DRM_DEVICE:-/dev/dri/by-path/pci-0000:0a:00.0-card}"
 SESSION_TEMPLATE="$ROOT/dev/denial.desktop.in"
@@ -871,12 +873,11 @@ build_polkit_agent() (
     prepare_sdk_package
     "$ROOT/tools/denial-flutter-engine" prepare-app-build
     run_pinned_cargo build --locked --release --jobs "$BUILD_JOBS" -p denial-polkit-agent
-    build_native_application polkit_app denial-app \
-        "$ROOT/polkit_app/build/linux/$DENIAL_FLUTTER_ARCH/release/bundle"
+    build_native_application polkit_app denial-app "$DIALOG_BUNDLE"
 )
 
 run_polkit_agent() {
-    local bundle="$ROOT/polkit_app/build/linux/$DENIAL_FLUTTER_ARCH/release/bundle"
+    local bundle="$DIALOG_BUNDLE"
     require_file "$RUST_TARGET/release/denial-polkit-agent"
     require_file "$bundle/denial-app"
     exec "$RUST_TARGET/release/denial-polkit-agent" \
@@ -1479,6 +1480,7 @@ show_session_state() {
         printf 'missing  %-18s %s\n' "portal routing" "$PORTAL_FILE"
     elif grep -Fqx "# Installed by $SCRIPT_DIR/denial-pc" "$PORTAL_FILE" \
         && grep -Fqx "org.freedesktop.impl.portal.Settings=denial;gtk" "$PORTAL_FILE" \
+        && grep -Fqx "org.freedesktop.impl.portal.Access=denial;gtk" "$PORTAL_FILE" \
         && grep -Fqx "org.freedesktop.impl.portal.ScreenCast=wlr" "$PORTAL_FILE" \
         && grep -Fqx "org.freedesktop.impl.portal.Screenshot=wlr" "$PORTAL_FILE"; then
         printf 'ok       %-18s %s\n' "portal routing" "$PORTAL_FILE"
@@ -1588,9 +1590,9 @@ install_session() {
         "$PORTAL_TEMPLATE" > "$portal_rendered"
     sed "s|@LAUNCHER@|$SCRIPT_DIR/denial-pc|g" \
         "$WLR_PORTAL_CONFIG_TEMPLATE" > "$wlr_portal_rendered"
-    sed "s|@PORTAL_BINARY@|$PORTAL_BINARY|g" \
+    sed -e "s|@PORTAL_BINARY@|$PORTAL_BINARY|g" -e "s|@DIALOG_BUNDLE@|$DIALOG_BUNDLE|g" \
         "$DENIAL_PORTAL_DBUS_TEMPLATE" > "$dbus_rendered"
-    sed "s|@PORTAL_BINARY@|$PORTAL_BINARY|g" \
+    sed -e "s|@PORTAL_BINARY@|$PORTAL_BINARY|g" -e "s|@DIALOG_BUNDLE@|$DIALOG_BUNDLE|g" \
         "$DENIAL_PORTAL_UNIT_TEMPLATE" > "$unit_rendered"
     sh -n "$SUSPEND_MODE_HOOK_SOURCE"
     if as_root install -Dm644 "$rendered" "$SESSION_FILE" \
@@ -1698,7 +1700,9 @@ remove_denial_portal_metadata() {
     fi
     if [[ -e "$DENIAL_PORTAL_DBUS_SERVICE" ]] \
         && { ! grep -Fqx "Name=org.freedesktop.impl.portal.desktop.denial" "$DENIAL_PORTAL_DBUS_SERVICE" \
-            || ! grep -Fqx "Exec=$PORTAL_BINARY" "$DENIAL_PORTAL_DBUS_SERVICE"; }; then
+            || ! grep -Fqx -e "Exec=$PORTAL_BINARY" \
+                -e "Exec=$PORTAL_BINARY --dialog-bundle $DIALOG_BUNDLE" \
+                "$DENIAL_PORTAL_DBUS_SERVICE"; }; then
         printf 'warning  refusing to remove unrecognized Denial portal D-Bus service %s\n' \
             "$DENIAL_PORTAL_DBUS_SERVICE" >&2
     else
@@ -1706,7 +1710,9 @@ remove_denial_portal_metadata() {
     fi
     if [[ -e "$DENIAL_PORTAL_UNIT" ]] \
         && { ! grep -Fqx "BusName=org.freedesktop.impl.portal.desktop.denial" "$DENIAL_PORTAL_UNIT" \
-            || ! grep -Fqx "ExecStart=$PORTAL_BINARY" "$DENIAL_PORTAL_UNIT"; }; then
+            || ! grep -Fqx -e "ExecStart=$PORTAL_BINARY" \
+                -e "ExecStart=$PORTAL_BINARY --dialog-bundle $DIALOG_BUNDLE" \
+                "$DENIAL_PORTAL_UNIT"; }; then
         printf 'warning  refusing to remove unrecognized Denial portal unit %s\n' \
             "$DENIAL_PORTAL_UNIT" >&2
     else

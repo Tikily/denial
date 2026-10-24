@@ -7853,6 +7853,48 @@ abstract class AppLocalizations {
   /// **'Temporarily locked'**
   String get polkitLocked;
 
+  /// Permission prompt: grants what an app asked for.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow'**
+  String get accessAllow;
+
+  /// Permission prompt: grants it while the app keeps running.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow once'**
+  String get accessAllowOnce;
+
+  /// Permission prompt: grants it and remembers the answer.
+  ///
+  /// In en, this message translates to:
+  /// **'Always allow'**
+  String get accessAlwaysAllow;
+
+  /// Permission prompt: refuses what an app asked for.
+  ///
+  /// In en, this message translates to:
+  /// **'Decline'**
+  String get accessDecline;
+
+  /// Permission prompt: refuses it and remembers the answer.
+  ///
+  /// In en, this message translates to:
+  /// **'Never allow'**
+  String get accessNeverAllow;
+
+  /// Permission prompt: refuses it while the app keeps running.
+  ///
+  /// In en, this message translates to:
+  /// **'Decline once'**
+  String get accessDeclineOnce;
+
+  /// Permission prompt: names an app that did not say which one it is.
+  ///
+  /// In en, this message translates to:
+  /// **'An app'**
+  String get accessUnknownApp;
+
   /// Plugin Manager: AppTitle.
   ///
   /// In en, this message translates to:
@@ -9081,6 +9123,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'PM'**
   String get timeAfternoon;
+
+  /// Label for the Permissions destination in Settings navigation.
+  ///
+  /// In en, this message translates to:
+  /// **'Permissions'**
+  String get settingsNavigationPermissions;
+
+  /// Heading of the Permissions page in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Permissions'**
+  String get settingsPermissionsSection;
+
+  /// Description of the Permissions page in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose what apps may do. An app appears here once it has asked.'**
+  String get settingsPermissionsTitle;
+
+  /// Permissions page: the permission to receive Denial's shortcut keys.
+  ///
+  /// In en, this message translates to:
+  /// **'Keyboard shortcuts'**
+  String get settingsPermissionsKeyboardShortcutsTitle;
+
+  /// Permissions page: explains the keyboard shortcuts permission.
+  ///
+  /// In en, this message translates to:
+  /// **'While it has focus, an allowed app receives the keys Denial uses for its own shortcuts, such as Super.'**
+  String get settingsPermissionsKeyboardShortcutsDescription;
+
+  /// Permissions page: no app has asked for this permission.
+  ///
+  /// In en, this message translates to:
+  /// **'No app has asked yet.'**
+  String get settingsPermissionsNone;
+
+  /// Permissions page: xdg-permission-store could not be reached.
+  ///
+  /// In en, this message translates to:
+  /// **'Permissions can’t be read: the portal permission store is not available.'**
+  String get settingsPermissionsUnavailable;
+
+  /// Permissions page: storing an answer failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn’t save the change.'**
+  String get settingsPermissionsSaveFailed;
+
+  /// Permissions page: ask the next time the app wants the permission.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask'**
+  String get settingsPermissionAsk;
+
+  /// Permissions page: always allow the permission.
+  ///
+  /// In en, this message translates to:
+  /// **'Always allow'**
+  String get settingsPermissionAllow;
+
+  /// Permissions page: never allow the permission.
+  ///
+  /// In en, this message translates to:
+  /// **'Never allow'**
+  String get settingsPermissionDeny;
 }
 
 class _AppLocalizationsDelegate

@@ -20,6 +20,14 @@ export 'src/settings/lock_pin/lock_pin_service.dart'
         lockPinMaxLength,
         lockPinMinLength,
         lockPinServiceProvider;
+export 'src/settings/permissions/app_permissions.dart'
+    show
+        AppPermission,
+        AppPermissionAnswer,
+        AppPermissionAnswers,
+        AppPermissionsService,
+        appPermissionsProvider,
+        appPermissionsServiceProvider;
 export 'src/settings/monitor_arrangement.dart'
     show
         MonitorArrangementGeometry,

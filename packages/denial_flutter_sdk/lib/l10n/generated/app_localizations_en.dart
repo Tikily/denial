@@ -4402,6 +4402,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String get polkitLocked => 'Temporarily locked';
 
   @override
+  String get accessAllow => 'Allow';
+
+  @override
+  String get accessAllowOnce => 'Allow once';
+
+  @override
+  String get accessAlwaysAllow => 'Always allow';
+
+  @override
+  String get accessDecline => 'Decline';
+
+  @override
+  String get accessNeverAllow => 'Never allow';
+
+  @override
+  String get accessDeclineOnce => 'Decline once';
+
+  @override
+  String get accessUnknownApp => 'An app';
+
+  @override
   String get pluginsAppTitle => 'Denial Plugins';
 
   @override
@@ -5101,4 +5122,40 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get timeAfternoon => 'PM';
+
+  @override
+  String get settingsNavigationPermissions => 'Permissions';
+
+  @override
+  String get settingsPermissionsSection => 'Permissions';
+
+  @override
+  String get settingsPermissionsTitle =>
+      'Choose what apps may do. An app appears here once it has asked.';
+
+  @override
+  String get settingsPermissionsKeyboardShortcutsTitle => 'Keyboard shortcuts';
+
+  @override
+  String get settingsPermissionsKeyboardShortcutsDescription =>
+      'While it has focus, an allowed app receives the keys Denial uses for its own shortcuts, such as Super.';
+
+  @override
+  String get settingsPermissionsNone => 'No app has asked yet.';
+
+  @override
+  String get settingsPermissionsUnavailable =>
+      'Permissions can’t be read: the portal permission store is not available.';
+
+  @override
+  String get settingsPermissionsSaveFailed => 'Couldn’t save the change.';
+
+  @override
+  String get settingsPermissionAsk => 'Ask';
+
+  @override
+  String get settingsPermissionAllow => 'Always allow';
+
+  @override
+  String get settingsPermissionDeny => 'Never allow';
 }
