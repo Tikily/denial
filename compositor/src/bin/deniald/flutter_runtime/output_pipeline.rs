@@ -184,6 +184,13 @@ impl OutputBufferBroker {
 
     pub(super) fn begin_transaction(&mut self) {
         self.transaction = self.transaction.wrapping_add(1).max(1);
+        self.retire_abandoned_renders();
+    }
+
+    /// Frees targets whose raster task ended without marking them ready. Call
+    /// only on the render thread between raster tasks.
+    pub(super) fn retire_abandoned_renders(&mut self) -> usize {
+        let mut retired = 0;
         for pool in &mut self.pools {
             for slot in &mut pool.slots {
                 if slot.state == BufferState::Rendering && slot.output_refs == 0 {
@@ -195,9 +202,11 @@ impl OutputBufferBroker {
                     slot.screenshot_request_id = None;
                     slot.ready_transaction = 0;
                     slot.request = None;
+                    retired += 1;
                 }
             }
         }
+        retired
     }
 
     pub(super) fn target_available(&self, output: OutputId) -> bool {
@@ -727,6 +736,44 @@ mod capture_tests {
         assert!(!broker.target_available(output));
         assert_eq!(broker.complete_authorization(42), 1);
         assert!(broker.target_available(output));
+    }
+
+    #[test]
+    fn raster_idle_retires_a_target_its_task_abandoned() {
+        let output = OutputId(7);
+        let view = RenderViewId::for_output(output).unwrap();
+        let size = PixelSize::new(64, 64);
+        let mut broker = OutputBufferBroker::new([OutputPoolDescriptor {
+            output_id: output,
+            render_view_id: view,
+            configuration_generation: 1,
+            size,
+            initial_scanout: 0,
+            framebuffers: &[11, 12, 13],
+        }])
+        .unwrap();
+        let now = Instant::now();
+        let request = OutputFrameRequest {
+            tick: FrameTick {
+                output,
+                sequence: 1,
+                nominal_interval: Duration::from_micros(4167),
+                interval: Duration::from_micros(4167),
+                render_deadline: now,
+                presentation_target: now + Duration::from_micros(4167),
+            },
+            dirty_serial: 1,
+            lock_frame_token: 0,
+            fingerprint_epoch: 0,
+        };
+        assert_eq!(broker.authorize(request, now, Some(41)), Some(view.get()));
+        broker.begin_authorization(41);
+        assert!(broker.acquire(view.get(), size).is_ok());
+        assert_eq!(broker.complete_authorization(41), 0);
+        assert!(!broker.target_available(output));
+        assert_eq!(broker.retire_abandoned_renders(), 1);
+        assert!(broker.target_available(output));
+        assert_eq!(broker.retire_abandoned_renders(), 0);
     }
 
     #[test]

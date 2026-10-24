@@ -401,7 +401,24 @@ impl OpenGlHandler for FlutterGlHandler {
         // If present() already sealed the transaction this is idempotent; if
         // the transaction had no present callback it supplies the missing
         // REQUESTED/RASTERIZING -> IDLE transition.
-        let ready = lock(&self.broker).finish_transaction();
+        //
+        // A view's root present runs in the same raster task as its
+        // present_view, so a handoff or Rendering target left at this point
+        // was abandoned. Keeping either would block every later frame.
+        let stale_handoff = lock(&self.pending_output_presentation).take();
+        let (ready, abandoned) = {
+            let mut broker = lock(&self.broker);
+            let ready = broker.finish_transaction();
+            (ready, broker.retire_abandoned_renders())
+        };
+        if stale_handoff.is_some() || abandoned != 0 {
+            error!(
+                view_id = ?stale_handoff.map(|handoff| handoff.view_id),
+                abandoned,
+                "Flutter raster task ended without presenting its output"
+            );
+            self.notify_frame_ready();
+        }
         lock(&self.raster_sampled_feedback).clear();
         let previous = self.finish_producer_frame();
         if !ready.is_empty() {
