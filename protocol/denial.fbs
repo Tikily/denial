@@ -109,7 +109,10 @@ enum KeyboardCommandKind : ubyte {
   DismissPanel = 2,
   // The keyboard panel starts moving to panel_height logical pixels over
   // panel_duration_ms. Sent once per motion, never per frame.
-  PanelMotion = 3
+  PanelMotion = 3,
+  // Replaces `replaced`, the text just before the cursor, with `text`: an
+  // autocorrection or a picked suggestion.
+  Replace = 4
 }
 
 enum SettingsRequestKind : ubyte {
@@ -642,6 +645,34 @@ table KeyboardCommand {
   // and how long the shell's motion there lasts.
   panel_height:uint;
   panel_duration_ms:uint;
+  // Replace only: the text that `text` replaces.
+  replaced:string;
+}
+
+// The word the software keyboard is typing, for suggestions. touch_x and
+// touch_y are empty or hold one entry per character: where its key was hit,
+// in key pitches right of and below the key's center, NaN without a touch.
+table TextPredictionRequest {
+  // Echoed by the answer. Only the newest request is answered.
+  serial:ulong;
+  word:string;
+  touch_x:[float];
+  touch_y:[float];
+  // The user typed the first capital, not the keyboard's sentence start: a
+  // name, which only a name may replace.
+  manual_capital:bool;
+}
+
+// Suggestions for the newest TextPredictionRequest.
+table TextPrediction {
+  serial:ulong;
+  word:string;
+  // What a space commits instead of the word; absent to keep it.
+  correction:string;
+  // Other words, best first, never the word or the correction.
+  suggestions:[string];
+  // Installed word lists, as language codes ("en", "it").
+  languages:[string];
 }
 
 table KeyboardLayout {
@@ -934,7 +965,9 @@ union Payload {
   CursorState,
   PluginActionCatalog,
   PluginActionInvocation,
-  PetRequest
+  PetRequest,
+  TextPredictionRequest,
+  TextPrediction
 }
 
 table Envelope {

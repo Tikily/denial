@@ -95,6 +95,9 @@ const KEYBOARD_PHASE_MASK: u32 = KEYBOARD_PRESSED | KEYBOARD_RELEASED;
 const KEYBOARD_FLAGS_MASK: u32 = KEYBOARD_CTRL | KEYBOARD_PHASE_MASK;
 const MAX_KEYBOARD_PANEL_HEIGHT: u32 = 16_384;
 const MAX_KEYBOARD_PANEL_DURATION_MS: u32 = 10_000;
+/// Longest word the keyboard asks suggestions for, in characters.
+const MAX_PREDICTION_WORD_CHARS: usize = 64;
+const MAX_PREDICTION_SUGGESTIONS: usize = 16;
 
 pub const INPUT_LAYOUT_KEYBOARD_CAPTURE: u32 = 1 << 0;
 pub const INPUT_LAYOUT_EXCLUSIVE_SHELL: u32 = 1 << 1;
@@ -213,6 +216,32 @@ pub enum KeyboardCommand {
         ctrl: bool,
         phase: KeyboardKeyPhase,
     },
+    /// Replaces `replaced`, the text just before the cursor, with `text`.
+    Replace {
+        replaced: String,
+        text: String,
+    },
+}
+
+/// The word the software keyboard is typing, for suggestions.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextPredictionRequest {
+    pub serial: u64,
+    pub word: String,
+    /// One per character when present: where its key was hit, in key
+    /// pitches from the key's center.
+    pub touches: Vec<Option<(f32, f32)>>,
+    pub manual_capital: bool,
+}
+
+/// Suggestions for the newest [`TextPredictionRequest`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TextPrediction {
+    pub serial: u64,
+    pub word: String,
+    pub correction: Option<String>,
+    pub suggestions: Vec<String>,
+    pub languages: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -822,6 +851,7 @@ pub struct WireBridge {
     input_layout_identities_scratch: HashSet<u64>,
     pending_window_commands: VecDeque<WindowCommand>,
     pending_keyboard_commands: VecDeque<KeyboardCommand>,
+    pending_text_prediction: Option<TextPredictionRequest>,
     pending_notification_commands: VecDeque<NotificationCommand>,
     pending_xembed_tray_commands: VecDeque<XEmbedTrayCommand>,
     pending_settings_commands: VecDeque<SettingsCommand>,
@@ -862,6 +892,7 @@ impl WireBridge {
             input_layout_identities_scratch: HashSet::new(),
             pending_window_commands: VecDeque::new(),
             pending_keyboard_commands: VecDeque::new(),
+            pending_text_prediction: None,
             pending_notification_commands: VecDeque::new(),
             pending_xembed_tray_commands: VecDeque::new(),
             pending_settings_commands: VecDeque::new(),
@@ -897,6 +928,11 @@ impl WireBridge {
 
     pub fn drain_keyboard_commands(&mut self) -> impl Iterator<Item = KeyboardCommand> + '_ {
         self.pending_keyboard_commands.drain(..)
+    }
+
+    /// The newest suggestion request; older ones are superseded.
+    pub fn take_text_prediction_request(&mut self) -> Option<TextPredictionRequest> {
+        self.pending_text_prediction.take()
     }
 
     pub fn drain_notification_commands(

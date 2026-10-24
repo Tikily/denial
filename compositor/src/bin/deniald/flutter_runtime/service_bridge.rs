@@ -36,6 +36,21 @@ impl FlutterRuntime {
         self.wire.drain_keyboard_commands()
     }
 
+    pub fn take_text_prediction_request(&mut self) -> Option<wire::TextPredictionRequest> {
+        self.wire.take_text_prediction_request()
+    }
+
+    pub fn send_text_prediction(&mut self, prediction: &wire::TextPrediction) -> Result<(), Box<dyn Error>> {
+        let engine = self
+            .host
+            .as_ref()
+            .expect("Flutter runtime is shutting down")
+            .engine();
+        let update = self.wire.encode_text_prediction(prediction)?;
+        engine.send_platform_message(wire::TO_FLUTTER_CHANNEL, update)?;
+        Ok(())
+    }
+
     pub fn take_text_input_state(&mut self) -> Option<(u64, TextInputSnapshot)> {
         self.text_input
             .take_state_change()

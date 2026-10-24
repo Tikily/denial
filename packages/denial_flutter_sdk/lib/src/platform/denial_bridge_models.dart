@@ -91,6 +91,30 @@ class DenialTextInputState {
   final int activationSerial;
 }
 
+/// Suggestions for the word the software keyboard is typing.
+class DenialTextPrediction {
+  const DenialTextPrediction({
+    required this.serial,
+    required this.word,
+    required this.correction,
+    required this.suggestions,
+    required this.languages,
+  });
+
+  /// The serial of the request this answers.
+  final int serial;
+  final String word;
+
+  /// What a space commits instead of [word], when it looks mistyped.
+  final String? correction;
+
+  /// Other words, best first; never [word] or [correction].
+  final List<String> suggestions;
+
+  /// The languages the suggestions come from, such as `en` and `it`.
+  final List<String> languages;
+}
+
 class DenialSettingsDocument {
   const DenialSettingsDocument({required this.revision, required this.json});
 

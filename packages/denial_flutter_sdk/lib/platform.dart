@@ -19,4 +19,5 @@ export 'src/platform/denial_bridge_models.dart'
         DenialShellAction,
         DenialShellActionEvent,
         DenialSoftwareDimmingState,
-        DenialTextInputState;
+        DenialTextInputState,
+        DenialTextPrediction;

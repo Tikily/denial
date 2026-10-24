@@ -156,6 +156,8 @@ class DenialBridge {
 
   Stream<DenialTextInputState> get textInputStates => _events.textInputStates;
 
+  Stream<DenialTextPrediction> get textPredictions => _events.textPredictions;
+
   Stream<DenialSettingsDocument> get settingsDocuments =>
       _settingsDocument.settingsDocuments;
 
@@ -398,6 +400,26 @@ class DenialBridge {
 
   void sendKeyboardKey(String key, {bool ctrl = false}) =>
       _input.sendKeyboardKey(key, ctrl: ctrl);
+
+  /// Replaces [replaced], the text just before the cursor, with [text].
+  void sendKeyboardReplace(String replaced, String text) =>
+      _input.sendKeyboardReplace(replaced, text);
+
+  /// Asks for suggestions for [word]; only the newest request is answered,
+  /// on [textPredictions].
+  void requestTextPrediction({
+    required int serial,
+    required String word,
+    required List<double> touchX,
+    required List<double> touchY,
+    bool manualCapital = false,
+  }) => _input.requestTextPrediction(
+    serial: serial,
+    word: word,
+    touchX: touchX,
+    touchY: touchY,
+    manualCapital: manualCapital,
+  );
 
   void dismissKeyboardPanel(int activationSerial) =>
       _input.dismissKeyboardPanel(activationSerial);

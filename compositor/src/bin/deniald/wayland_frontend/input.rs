@@ -471,7 +471,8 @@ pub(super) fn navigate_back(state: &mut RuntimeState, window: &smithay::desktop:
 ///
 /// These transitions enter the same focus, XKB, shortcut, Flutter and Wayland
 /// router as libinput keyboard events. The software keyboard is an input
-/// source, not a separate text-delivery protocol.
+/// source; only text the keymap cannot type, and replacements of the word
+/// before the cursor, go to the focused editor as input-method commits.
 pub(crate) fn dispatch_shell_keyboard(
     state: &mut RuntimeState,
     command: &super::super::wire::KeyboardCommand,
@@ -500,16 +501,38 @@ pub(crate) fn dispatch_shell_keyboard(
             frontend.set_keyboard_height(*height, *duration_ms);
             true
         }
-        super::super::wire::KeyboardCommand::Text(text) => {
-            let mut delivered = false;
-            for character in text.chars() {
-                let Some(stroke) = shell_text_key_stroke(character) else {
-                    warn!(%character, "ignored character unsupported by the shell keyboard keymap");
-                    continue;
-                };
-                delivered |= inject_shell_key_stroke(state, &keyboard, stroke, false, time);
+        super::super::wire::KeyboardCommand::Text(text)
+            if text.chars().any(|character| shell_text_key_stroke(character).is_none()) =>
+        {
+            // The keymap types ASCII only; an editor takes any text.
+            let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+            match frontend.commit_shell_keyboard_text(None, text) {
+                Some(delivered) => delivered,
+                None => type_shell_text(state, &keyboard, text, time),
             }
-            delivered
+        }
+        super::super::wire::KeyboardCommand::Replace { replaced, text } => {
+            let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+            match frontend.commit_shell_keyboard_text(Some(replaced), text) {
+                Some(true) => true,
+                Some(false) => {
+                    tracing::debug!("kept the typed word: the cursor left it");
+                    false
+                }
+                None => {
+                    // No text-input: erase the word with keys and retype it.
+                    let Some(backspace) = shell_named_key_stroke("BackSpace") else {
+                        return false;
+                    };
+                    for _ in replaced.chars() {
+                        inject_shell_key_stroke(state, &keyboard, backspace, false, time);
+                    }
+                    type_shell_text(state, &keyboard, text, time)
+                }
+            }
+        }
+        super::super::wire::KeyboardCommand::Text(text) => {
+            type_shell_text(state, &keyboard, text, time)
         }
         super::super::wire::KeyboardCommand::Key { key, ctrl, phase } => {
             let Some(stroke) = shell_named_key_stroke(key) else {
@@ -529,6 +552,24 @@ pub(crate) fn dispatch_shell_keyboard(
             }
         }
     }
+}
+
+#[cfg(feature = "flutter")]
+fn type_shell_text(
+    state: &mut RuntimeState,
+    keyboard: &KeyboardHandle<RuntimeState>,
+    text: &str,
+    time: InputTime,
+) -> bool {
+    let mut delivered = false;
+    for character in text.chars() {
+        let Some(stroke) = shell_text_key_stroke(character) else {
+            warn!(%character, "ignored character unsupported by the shell keyboard keymap");
+            continue;
+        };
+        delivered |= inject_shell_key_stroke(state, keyboard, stroke, false, time);
+    }
+    delivered
 }
 
 #[cfg(feature = "flutter")]

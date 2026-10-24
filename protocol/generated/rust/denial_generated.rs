@@ -942,14 +942,15 @@ impl flatbuffers::SimpleToVerifyInSlice for ShellActionKind {}
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_KEYBOARD_COMMAND_KIND: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_KEYBOARD_COMMAND_KIND: u8 = 3;
+pub const ENUM_MAX_KEYBOARD_COMMAND_KIND: u8 = 4;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_KEYBOARD_COMMAND_KIND: [KeyboardCommandKind; 4] = [
+pub const ENUM_VALUES_KEYBOARD_COMMAND_KIND: [KeyboardCommandKind; 5] = [
   KeyboardCommandKind::Text,
   KeyboardCommandKind::Key,
   KeyboardCommandKind::DismissPanel,
   KeyboardCommandKind::PanelMotion,
+  KeyboardCommandKind::Replace,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -961,14 +962,16 @@ impl KeyboardCommandKind {
   pub const Key: Self = Self(1);
   pub const DismissPanel: Self = Self(2);
   pub const PanelMotion: Self = Self(3);
+  pub const Replace: Self = Self(4);
 
   pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 3;
+  pub const ENUM_MAX: u8 = 4;
   pub const ENUM_VALUES: &'static [Self] = &[
     Self::Text,
     Self::Key,
     Self::DismissPanel,
     Self::PanelMotion,
+    Self::Replace,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
@@ -977,6 +980,7 @@ impl KeyboardCommandKind {
       Self::Key => Some("Key"),
       Self::DismissPanel => Some("DismissPanel"),
       Self::PanelMotion => Some("PanelMotion"),
+      Self::Replace => Some("Replace"),
       _ => None,
     }
   }
@@ -2765,10 +2769,10 @@ impl flatbuffers::SimpleToVerifyInSlice for PetRequestKind {}
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_PAYLOAD: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_PAYLOAD: u8 = 22;
+pub const ENUM_MAX_PAYLOAD: u8 = 24;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_PAYLOAD: [Payload; 23] = [
+pub const ENUM_VALUES_PAYLOAD: [Payload; 25] = [
   Payload::NONE,
   Payload::InputLayout,
   Payload::WindowSnapshot,
@@ -2792,6 +2796,8 @@ pub const ENUM_VALUES_PAYLOAD: [Payload; 23] = [
   Payload::PluginActionCatalog,
   Payload::PluginActionInvocation,
   Payload::PetRequest,
+  Payload::TextPredictionRequest,
+  Payload::TextPrediction,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -2822,9 +2828,11 @@ impl Payload {
   pub const PluginActionCatalog: Self = Self(20);
   pub const PluginActionInvocation: Self = Self(21);
   pub const PetRequest: Self = Self(22);
+  pub const TextPredictionRequest: Self = Self(23);
+  pub const TextPrediction: Self = Self(24);
 
   pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 22;
+  pub const ENUM_MAX: u8 = 24;
   pub const ENUM_VALUES: &'static [Self] = &[
     Self::NONE,
     Self::InputLayout,
@@ -2849,6 +2857,8 @@ impl Payload {
     Self::PluginActionCatalog,
     Self::PluginActionInvocation,
     Self::PetRequest,
+    Self::TextPredictionRequest,
+    Self::TextPrediction,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
@@ -2876,6 +2886,8 @@ impl Payload {
       Self::PluginActionCatalog => Some("PluginActionCatalog"),
       Self::PluginActionInvocation => Some("PluginActionInvocation"),
       Self::PetRequest => Some("PetRequest"),
+      Self::TextPredictionRequest => Some("TextPredictionRequest"),
+      Self::TextPrediction => Some("TextPrediction"),
       _ => None,
     }
   }
@@ -7553,6 +7565,7 @@ impl<'a> KeyboardCommand<'a> {
   pub const VT_ACTIVATION_SERIAL: flatbuffers::VOffsetT = 12;
   pub const VT_PANEL_HEIGHT: flatbuffers::VOffsetT = 14;
   pub const VT_PANEL_DURATION_MS: flatbuffers::VOffsetT = 16;
+  pub const VT_REPLACED: flatbuffers::VOffsetT = 18;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -7565,6 +7578,7 @@ impl<'a> KeyboardCommand<'a> {
   ) -> flatbuffers::WIPOffset<KeyboardCommand<'bldr>> {
     let mut builder = KeyboardCommandBuilder::new(_fbb);
     builder.add_activation_serial(args.activation_serial);
+    if let Some(x) = args.replaced { builder.add_replaced(x); }
     builder.add_panel_duration_ms(args.panel_duration_ms);
     builder.add_panel_height(args.panel_height);
     builder.add_flags(args.flags);
@@ -7624,6 +7638,13 @@ impl<'a> KeyboardCommand<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<u32>(KeyboardCommand::VT_PANEL_DURATION_MS, Some(0)).unwrap()}
   }
+  #[inline]
+  pub fn replaced(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(KeyboardCommand::VT_REPLACED, None)}
+  }
 }
 
 impl flatbuffers::Verifiable for KeyboardCommand<'_> {
@@ -7640,6 +7661,7 @@ impl flatbuffers::Verifiable for KeyboardCommand<'_> {
      .visit_field::<u64>("activation_serial", Self::VT_ACTIVATION_SERIAL, false)?
      .visit_field::<u32>("panel_height", Self::VT_PANEL_HEIGHT, false)?
      .visit_field::<u32>("panel_duration_ms", Self::VT_PANEL_DURATION_MS, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("replaced", Self::VT_REPLACED, false)?
      .finish();
     Ok(())
   }
@@ -7652,6 +7674,7 @@ pub struct KeyboardCommandArgs<'a> {
     pub activation_serial: u64,
     pub panel_height: u32,
     pub panel_duration_ms: u32,
+    pub replaced: Option<flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for KeyboardCommandArgs<'a> {
   #[inline]
@@ -7664,6 +7687,7 @@ impl<'a> Default for KeyboardCommandArgs<'a> {
       activation_serial: 0,
       panel_height: 0,
       panel_duration_ms: 0,
+      replaced: None,
     }
   }
 }
@@ -7702,6 +7726,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> KeyboardCommandBuilder<'a, 'b, 
     self.fbb_.push_slot::<u32>(KeyboardCommand::VT_PANEL_DURATION_MS, panel_duration_ms, 0);
   }
   #[inline]
+  pub fn add_replaced(&mut self, replaced: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(KeyboardCommand::VT_REPLACED, replaced);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> KeyboardCommandBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     KeyboardCommandBuilder {
@@ -7726,6 +7754,337 @@ impl core::fmt::Debug for KeyboardCommand<'_> {
       ds.field("activation_serial", &self.activation_serial());
       ds.field("panel_height", &self.panel_height());
       ds.field("panel_duration_ms", &self.panel_duration_ms());
+      ds.field("replaced", &self.replaced());
+      ds.finish()
+  }
+}
+pub enum TextPredictionRequestOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct TextPredictionRequest<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for TextPredictionRequest<'a> {
+  type Inner = TextPredictionRequest<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: unsafe { flatbuffers::Table::new(buf, loc) } }
+  }
+}
+
+impl<'a> TextPredictionRequest<'a> {
+  pub const VT_SERIAL: flatbuffers::VOffsetT = 4;
+  pub const VT_WORD: flatbuffers::VOffsetT = 6;
+  pub const VT_TOUCH_X: flatbuffers::VOffsetT = 8;
+  pub const VT_TOUCH_Y: flatbuffers::VOffsetT = 10;
+  pub const VT_MANUAL_CAPITAL: flatbuffers::VOffsetT = 12;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    TextPredictionRequest { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args TextPredictionRequestArgs<'args>
+  ) -> flatbuffers::WIPOffset<TextPredictionRequest<'bldr>> {
+    let mut builder = TextPredictionRequestBuilder::new(_fbb);
+    builder.add_serial(args.serial);
+    if let Some(x) = args.touch_y { builder.add_touch_y(x); }
+    if let Some(x) = args.touch_x { builder.add_touch_x(x); }
+    if let Some(x) = args.word { builder.add_word(x); }
+    builder.add_manual_capital(args.manual_capital);
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn serial(&self) -> u64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u64>(TextPredictionRequest::VT_SERIAL, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn word(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(TextPredictionRequest::VT_WORD, None)}
+  }
+  #[inline]
+  pub fn touch_x(&self) -> Option<flatbuffers::Vector<'a, f32>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f32>>>(TextPredictionRequest::VT_TOUCH_X, None)}
+  }
+  #[inline]
+  pub fn touch_y(&self) -> Option<flatbuffers::Vector<'a, f32>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f32>>>(TextPredictionRequest::VT_TOUCH_Y, None)}
+  }
+  #[inline]
+  pub fn manual_capital(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(TextPredictionRequest::VT_MANUAL_CAPITAL, Some(false)).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for TextPredictionRequest<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u64>("serial", Self::VT_SERIAL, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("word", Self::VT_WORD, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f32>>>("touch_x", Self::VT_TOUCH_X, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f32>>>("touch_y", Self::VT_TOUCH_Y, false)?
+     .visit_field::<bool>("manual_capital", Self::VT_MANUAL_CAPITAL, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct TextPredictionRequestArgs<'a> {
+    pub serial: u64,
+    pub word: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub touch_x: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f32>>>,
+    pub touch_y: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f32>>>,
+    pub manual_capital: bool,
+}
+impl<'a> Default for TextPredictionRequestArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    TextPredictionRequestArgs {
+      serial: 0,
+      word: None,
+      touch_x: None,
+      touch_y: None,
+      manual_capital: false,
+    }
+  }
+}
+
+pub struct TextPredictionRequestBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> TextPredictionRequestBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_serial(&mut self, serial: u64) {
+    self.fbb_.push_slot::<u64>(TextPredictionRequest::VT_SERIAL, serial, 0);
+  }
+  #[inline]
+  pub fn add_word(&mut self, word: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(TextPredictionRequest::VT_WORD, word);
+  }
+  #[inline]
+  pub fn add_touch_x(&mut self, touch_x: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f32>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(TextPredictionRequest::VT_TOUCH_X, touch_x);
+  }
+  #[inline]
+  pub fn add_touch_y(&mut self, touch_y: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f32>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(TextPredictionRequest::VT_TOUCH_Y, touch_y);
+  }
+  #[inline]
+  pub fn add_manual_capital(&mut self, manual_capital: bool) {
+    self.fbb_.push_slot::<bool>(TextPredictionRequest::VT_MANUAL_CAPITAL, manual_capital, false);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> TextPredictionRequestBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    TextPredictionRequestBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<TextPredictionRequest<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for TextPredictionRequest<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("TextPredictionRequest");
+      ds.field("serial", &self.serial());
+      ds.field("word", &self.word());
+      ds.field("touch_x", &self.touch_x());
+      ds.field("touch_y", &self.touch_y());
+      ds.field("manual_capital", &self.manual_capital());
+      ds.finish()
+  }
+}
+pub enum TextPredictionOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct TextPrediction<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for TextPrediction<'a> {
+  type Inner = TextPrediction<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: unsafe { flatbuffers::Table::new(buf, loc) } }
+  }
+}
+
+impl<'a> TextPrediction<'a> {
+  pub const VT_SERIAL: flatbuffers::VOffsetT = 4;
+  pub const VT_WORD: flatbuffers::VOffsetT = 6;
+  pub const VT_CORRECTION: flatbuffers::VOffsetT = 8;
+  pub const VT_SUGGESTIONS: flatbuffers::VOffsetT = 10;
+  pub const VT_LANGUAGES: flatbuffers::VOffsetT = 12;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    TextPrediction { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args TextPredictionArgs<'args>
+  ) -> flatbuffers::WIPOffset<TextPrediction<'bldr>> {
+    let mut builder = TextPredictionBuilder::new(_fbb);
+    builder.add_serial(args.serial);
+    if let Some(x) = args.languages { builder.add_languages(x); }
+    if let Some(x) = args.suggestions { builder.add_suggestions(x); }
+    if let Some(x) = args.correction { builder.add_correction(x); }
+    if let Some(x) = args.word { builder.add_word(x); }
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn serial(&self) -> u64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u64>(TextPrediction::VT_SERIAL, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn word(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(TextPrediction::VT_WORD, None)}
+  }
+  #[inline]
+  pub fn correction(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(TextPrediction::VT_CORRECTION, None)}
+  }
+  #[inline]
+  pub fn suggestions(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>(TextPrediction::VT_SUGGESTIONS, None)}
+  }
+  #[inline]
+  pub fn languages(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>(TextPrediction::VT_LANGUAGES, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for TextPrediction<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u64>("serial", Self::VT_SERIAL, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("word", Self::VT_WORD, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("correction", Self::VT_CORRECTION, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<&'_ str>>>>("suggestions", Self::VT_SUGGESTIONS, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<&'_ str>>>>("languages", Self::VT_LANGUAGES, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct TextPredictionArgs<'a> {
+    pub serial: u64,
+    pub word: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub correction: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub suggestions: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>,
+    pub languages: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>,
+}
+impl<'a> Default for TextPredictionArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    TextPredictionArgs {
+      serial: 0,
+      word: None,
+      correction: None,
+      suggestions: None,
+      languages: None,
+    }
+  }
+}
+
+pub struct TextPredictionBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> TextPredictionBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_serial(&mut self, serial: u64) {
+    self.fbb_.push_slot::<u64>(TextPrediction::VT_SERIAL, serial, 0);
+  }
+  #[inline]
+  pub fn add_word(&mut self, word: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(TextPrediction::VT_WORD, word);
+  }
+  #[inline]
+  pub fn add_correction(&mut self, correction: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(TextPrediction::VT_CORRECTION, correction);
+  }
+  #[inline]
+  pub fn add_suggestions(&mut self, suggestions: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<&'b  str>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(TextPrediction::VT_SUGGESTIONS, suggestions);
+  }
+  #[inline]
+  pub fn add_languages(&mut self, languages: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<&'b  str>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(TextPrediction::VT_LANGUAGES, languages);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> TextPredictionBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    TextPredictionBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<TextPrediction<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for TextPrediction<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("TextPrediction");
+      ds.field("serial", &self.serial());
+      ds.field("word", &self.word());
+      ds.field("correction", &self.correction());
+      ds.field("suggestions", &self.suggestions());
+      ds.field("languages", &self.languages());
       ds.finish()
   }
 }
@@ -12651,6 +13010,36 @@ impl<'a> Envelope<'a> {
     }
   }
 
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn payload_as_text_prediction_request(&self) -> Option<TextPredictionRequest<'a>> {
+    if self.payload_type() == Payload::TextPredictionRequest {
+      self.payload().map(|t| {
+       // Safety:
+       // Created from a valid Table for this object
+       // Which contains a valid union in this slot
+       unsafe { TextPredictionRequest::init_from_table(t) }
+     })
+    } else {
+      None
+    }
+  }
+
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn payload_as_text_prediction(&self) -> Option<TextPrediction<'a>> {
+    if self.payload_type() == Payload::TextPrediction {
+      self.payload().map(|t| {
+       // Safety:
+       // Created from a valid Table for this object
+       // Which contains a valid union in this slot
+       unsafe { TextPrediction::init_from_table(t) }
+     })
+    } else {
+      None
+    }
+  }
+
 }
 
 impl flatbuffers::Verifiable for Envelope<'_> {
@@ -12687,6 +13076,8 @@ impl flatbuffers::Verifiable for Envelope<'_> {
           Payload::PluginActionCatalog => v.verify_union_variant::<flatbuffers::ForwardsUOffset<PluginActionCatalog>>("Payload::PluginActionCatalog", pos),
           Payload::PluginActionInvocation => v.verify_union_variant::<flatbuffers::ForwardsUOffset<PluginActionInvocation>>("Payload::PluginActionInvocation", pos),
           Payload::PetRequest => v.verify_union_variant::<flatbuffers::ForwardsUOffset<PetRequest>>("Payload::PetRequest", pos),
+          Payload::TextPredictionRequest => v.verify_union_variant::<flatbuffers::ForwardsUOffset<TextPredictionRequest>>("Payload::TextPredictionRequest", pos),
+          Payload::TextPrediction => v.verify_union_variant::<flatbuffers::ForwardsUOffset<TextPrediction>>("Payload::TextPrediction", pos),
           _ => Ok(()),
         }
      })?
@@ -12911,6 +13302,20 @@ impl core::fmt::Debug for Envelope<'_> {
         },
         Payload::PetRequest => {
           if let Some(x) = self.payload_as_pet_request() {
+            ds.field("payload", &x)
+          } else {
+            ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        Payload::TextPredictionRequest => {
+          if let Some(x) = self.payload_as_text_prediction_request() {
+            ds.field("payload", &x)
+          } else {
+            ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        Payload::TextPrediction => {
+          if let Some(x) = self.payload_as_text_prediction() {
             ds.field("payload", &x)
           } else {
             ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")

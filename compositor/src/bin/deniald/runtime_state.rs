@@ -114,6 +114,10 @@ pub(super) struct RuntimeState {
     #[cfg(feature = "flutter")]
     pub(super) pending_orientation: Option<orientation_sensor::Orientation>,
     #[cfg(feature = "flutter")]
+    pub(super) text_prediction: Option<text_prediction::TextPredictionService>,
+    #[cfg(feature = "flutter")]
+    pub(super) pending_text_prediction: Option<wire::TextPrediction>,
+    #[cfg(feature = "flutter")]
     pub(super) lid: lid_switch::LidSwitch,
     #[cfg(feature = "flutter")]
     pub(super) output_control_dirty: bool,

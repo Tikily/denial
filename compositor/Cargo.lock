@@ -449,6 +449,7 @@ dependencies = [
  "async-io",
  "calloop",
  "denial-flutter-engine",
+ "denial-text-prediction",
  "drm-ffi",
  "flatbuffers",
  "futures-lite",
@@ -502,6 +503,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zbus",
+]
+
+[[package]]
+name = "denial-text-prediction"
+version = "0.0.0"
+dependencies = [
+ "flate2",
 ]
 
 [[package]]

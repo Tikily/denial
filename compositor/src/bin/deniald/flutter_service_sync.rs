@@ -387,6 +387,54 @@ pub(super) fn synchronize_shell_keyboard(
         events.scene_sync.mark_dirty();
     }
 
+    deliver_flutter_input_method_transactions(runtime, events)?;
+    if let Some((generation, snapshot)) = runtime.take_text_input_state()
+        && events
+            .wayland
+            .as_mut()
+            .is_some_and(|frontend| frontend.observe_flutter_text_editor(generation, snapshot))
+    {
+        events.scene_sync.mark_dirty();
+    }
+    wayland_frontend::synchronize_input_deck(runtime, events)?;
+    publish_software_keyboard_state(runtime, events)?;
+    if let Some(request) = runtime.take_text_prediction_request()
+        && !events.secure_session_locked()
+        && let Some(service) = events.text_prediction.as_ref()
+    {
+        service.ask(request);
+    }
+    if let Some(prediction) = events.pending_text_prediction.take() {
+        runtime.send_text_prediction(&prediction)?;
+    }
+    let commands = runtime.drain_keyboard_commands().collect::<Vec<_>>();
+    // The OSK is a virtual keyboard source. Rust converts each intent into
+    // complete key transitions and feeds the same focus/XKB/seat-or-Flutter
+    // router used by libinput; there is no separate text-delivery path.
+    let mut flush_wayland_clients = false;
+    for command in commands {
+        let delivered = wayland_frontend::dispatch_shell_keyboard(events, &command);
+        flush_wayland_clients |= delivered;
+        if !delivered {
+            warn!(
+                ?command,
+                "virtual keyboard could not produce this key transition"
+            );
+        }
+    }
+    // Shell-keyboard text committed to a Flutter editor.
+    deliver_flutter_input_method_transactions(runtime, events)?;
+    if flush_wayland_clients && let Some(frontend) = events.wayland.as_mut() {
+        frontend.display_handle.flush_clients()?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "flutter")]
+fn deliver_flutter_input_method_transactions(
+    runtime: &mut flutter_runtime::FlutterRuntime,
+    events: &mut RuntimeState,
+) -> Result<(), Box<dyn Error>> {
     let input_method_transactions = events
         .wayland
         .as_mut()
@@ -405,34 +453,6 @@ pub(super) fn synchronize_shell_keyboard(
                 );
             }
         }
-    }
-    if let Some((generation, snapshot)) = runtime.take_text_input_state()
-        && events
-            .wayland
-            .as_mut()
-            .is_some_and(|frontend| frontend.observe_flutter_text_editor(generation, snapshot))
-    {
-        events.scene_sync.mark_dirty();
-    }
-    wayland_frontend::synchronize_input_deck(runtime, events)?;
-    publish_software_keyboard_state(runtime, events)?;
-    let commands = runtime.drain_keyboard_commands().collect::<Vec<_>>();
-    // The OSK is a virtual keyboard source. Rust converts each intent into
-    // complete key transitions and feeds the same focus/XKB/seat-or-Flutter
-    // router used by libinput; there is no separate text-delivery path.
-    let mut flush_wayland_clients = false;
-    for command in commands {
-        let delivered = wayland_frontend::dispatch_shell_keyboard(events, &command);
-        flush_wayland_clients |= delivered;
-        if !delivered {
-            warn!(
-                ?command,
-                "virtual keyboard could not produce this key transition"
-            );
-        }
-    }
-    if flush_wayland_clients && let Some(frontend) = events.wayland.as_mut() {
-        frontend.display_handle.flush_clients()?;
     }
     Ok(())
 }

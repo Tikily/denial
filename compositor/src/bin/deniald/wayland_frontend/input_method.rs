@@ -716,7 +716,7 @@ impl InputMethodManager {
             .then_some(root)
     }
 
-    fn queue_flutter_transaction(
+    pub(super) fn queue_flutter_transaction(
         &mut self,
         generation: u64,
         client_id: i64,

@@ -379,6 +379,38 @@ class DenialWireCodec {
     );
   }
 
+  Uint8List encodeKeyboardReplace(String replaced, String text) {
+    return _encodeEnvelope(
+      generated.PayloadTypeId.KeyboardCommand,
+      generated.KeyboardCommandObjectBuilder(
+        kind: generated.KeyboardCommandKind.Replace,
+        replaced: replaced,
+        text: text,
+      ),
+    );
+  }
+
+  /// [touchX] and [touchY] hold one offset per character of [word], in key
+  /// pitches from the key's center (NaN when unknown), or are both empty.
+  Uint8List encodeTextPredictionRequest({
+    required int serial,
+    required String word,
+    required List<double> touchX,
+    required List<double> touchY,
+    required bool manualCapital,
+  }) {
+    return _encodeEnvelope(
+      generated.PayloadTypeId.TextPredictionRequest,
+      generated.TextPredictionRequestObjectBuilder(
+        serial: serial,
+        word: word,
+        touchX: touchX,
+        touchY: touchY,
+        manualCapital: manualCapital,
+      ),
+    );
+  }
+
   Uint8List encodeKeyboardPanelDismissal(int activationSerial) {
     return _encodeEnvelope(
       generated.PayloadTypeId.KeyboardCommand,

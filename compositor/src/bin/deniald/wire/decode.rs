@@ -57,6 +57,16 @@ impl WireBridge {
                 self.pending_keyboard_commands.push_back(command);
                 Ok(None)
             }
+            fb::Payload::TextPredictionRequest => {
+                if envelope.request_id() != 0 {
+                    return Err(WireError::RequestId);
+                }
+                let request = envelope
+                    .payload_as_text_prediction_request()
+                    .ok_or(WireError::Payload)?;
+                self.pending_text_prediction = Some(decode_text_prediction_request(request)?);
+                Ok(None)
+            }
             fb::Payload::DesktopNotificationCommand => {
                 let command = envelope
                     .payload_as_desktop_notification_command()
@@ -528,6 +538,17 @@ fn decode_keyboard_command(command: fb::KeyboardCommand<'_>) -> Result<KeyboardC
                 text.expect("validated keyboard text").to_owned(),
             ))
         }
+        fb::KeyboardCommandKind::Replace => {
+            if command.flags() != 0 || command.key().is_some() {
+                return Err(WireError::Payload);
+            }
+            validate_required_string(command.text())?;
+            validate_required_string(command.replaced())?;
+            Ok(KeyboardCommand::Replace {
+                replaced: command.replaced().expect("validated replaced text").to_owned(),
+                text: command.text().expect("validated replacement").to_owned(),
+            })
+        }
         fb::KeyboardCommandKind::Key => {
             let key = command.key();
             validate_required_string(key)?;
@@ -549,6 +570,32 @@ fn decode_keyboard_command(command: fb::KeyboardCommand<'_>) -> Result<KeyboardC
         }
         _ => Err(WireError::Enumeration),
     }
+}
+
+fn decode_text_prediction_request(
+    request: fb::TextPredictionRequest<'_>,
+) -> Result<TextPredictionRequest, WireError> {
+    let word = request.word().unwrap_or_default();
+    let characters = word.chars().count();
+    if characters > MAX_PREDICTION_WORD_CHARS {
+        return Err(WireError::String);
+    }
+    let xs = request.touch_x().map(|values| values.iter().collect::<Vec<f32>>()).unwrap_or_default();
+    let ys = request.touch_y().map(|values| values.iter().collect::<Vec<f32>>()).unwrap_or_default();
+    if xs.len() != ys.len() || !(xs.is_empty() || xs.len() == characters) {
+        return Err(WireError::Count);
+    }
+    let touches = xs
+        .into_iter()
+        .zip(ys)
+        .map(|(x, y)| (x.is_finite() && y.is_finite()).then_some((x, y)))
+        .collect();
+    Ok(TextPredictionRequest {
+        serial: request.serial(),
+        word: word.to_owned(),
+        touches,
+        manual_capital: request.manual_capital(),
+    })
 }
 
 fn decode_settings_request(

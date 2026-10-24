@@ -1731,3 +1731,136 @@ fn client_texture_rejects_invalid_native_image_contracts() {
         assert!(validate_windows(&[scene]).is_err());
     }
 }
+
+fn keyboard_replace(replaced: &str, text: &str) -> Vec<u8> {
+    let mut builder = FlatBufferBuilder::new();
+    let replaced = builder.create_string(replaced);
+    let text = builder.create_string(text);
+    let command = fb::KeyboardCommand::create(
+        &mut builder,
+        &fb::KeyboardCommandArgs {
+            kind: fb::KeyboardCommandKind::Replace,
+            text: Some(text),
+            replaced: Some(replaced),
+            ..Default::default()
+        },
+    );
+    let envelope = fb::Envelope::create(
+        &mut builder,
+        &fb::EnvelopeArgs {
+            protocol_version: PROTOCOL_VERSION,
+            sequence: 12,
+            payload_type: fb::Payload::KeyboardCommand,
+            payload: Some(command.as_union_value()),
+            ..Default::default()
+        },
+    );
+    fb::finish_envelope_buffer(&mut builder, envelope);
+    builder.finished_data().to_vec()
+}
+
+#[test]
+fn keyboard_replace_needs_both_texts() {
+    let mut bridge = bridge();
+    bridge.handle(&keyboard_replace("perche", "perché")).unwrap();
+    assert_eq!(
+        bridge.pending_keyboard_commands.pop_front().unwrap(),
+        KeyboardCommand::Replace {
+            replaced: "perche".into(),
+            text: "perché".into()
+        }
+    );
+    assert!(bridge.handle(&keyboard_replace("", "a")).is_err());
+    assert!(bridge.handle(&keyboard_replace("a", "")).is_err());
+    assert!(bridge.pending_keyboard_commands.is_empty());
+}
+
+fn prediction_request(serial: u64, word: &str, xs: &[f32], ys: &[f32], request_id: u64) -> Vec<u8> {
+    let mut builder = FlatBufferBuilder::new();
+    let word = builder.create_string(word);
+    let xs = builder.create_vector(xs);
+    let ys = builder.create_vector(ys);
+    let request = fb::TextPredictionRequest::create(
+        &mut builder,
+        &fb::TextPredictionRequestArgs {
+            serial,
+            word: Some(word),
+            touch_x: Some(xs),
+            touch_y: Some(ys),
+            manual_capital: true,
+        },
+    );
+    let envelope = fb::Envelope::create(
+        &mut builder,
+        &fb::EnvelopeArgs {
+            protocol_version: PROTOCOL_VERSION,
+            sequence: 13,
+            request_id,
+            payload_type: fb::Payload::TextPredictionRequest,
+            payload: Some(request.as_union_value()),
+        },
+    );
+    fb::finish_envelope_buffer(&mut builder, envelope);
+    builder.finished_data().to_vec()
+}
+
+#[test]
+fn text_prediction_keeps_only_the_newest_request() {
+    let mut bridge = bridge();
+    bridge.handle(&prediction_request(1, "ci", &[], &[], 0)).unwrap();
+    bridge
+        .handle(&prediction_request(2, "città", &[0.1, f32::NAN, 0.0, 0.0, 0.0], &[0.2, 0.0, 0.0, 0.0, -0.3], 0))
+        .unwrap();
+    assert_eq!(
+        bridge.take_text_prediction_request(),
+        Some(TextPredictionRequest {
+            serial: 2,
+            word: "città".into(),
+            touches: vec![Some((0.1, 0.2)), None, Some((0.0, 0.0)), Some((0.0, 0.0)), Some((0.0, -0.3))],
+            manual_capital: true,
+        })
+    );
+    assert_eq!(bridge.take_text_prediction_request(), None);
+
+    assert!(matches!(
+        bridge.handle(&prediction_request(3, "ab", &[0.0], &[0.0], 0)),
+        Err(WireError::Count)
+    ));
+    assert!(matches!(
+        bridge.handle(&prediction_request(4, "ab", &[], &[], 9)),
+        Err(WireError::RequestId)
+    ));
+    assert!(bridge
+        .handle(&prediction_request(5, &"a".repeat(MAX_PREDICTION_WORD_CHARS + 1), &[], &[], 0))
+        .is_err());
+    assert_eq!(bridge.take_text_prediction_request(), None);
+}
+
+#[test]
+fn text_prediction_encodes_suggestions() {
+    let mut bridge = bridge();
+    let prediction = TextPrediction {
+        serial: 7,
+        word: "perche".into(),
+        correction: Some("perché".into()),
+        suggestions: vec!["perché".into(), "perche".into(), "perciò".into()],
+        languages: vec!["en".into(), "it".into()],
+    };
+    let bytes = bridge.encode_text_prediction(&prediction).unwrap().to_vec();
+    let envelope = fb::root_as_envelope(&bytes).unwrap();
+    assert_eq!(envelope.request_id(), 0);
+    let decoded = envelope.payload_as_text_prediction().unwrap();
+    assert_eq!(decoded.serial(), 7);
+    assert_eq!(decoded.word(), Some("perche"));
+    assert_eq!(decoded.correction(), Some("perché"));
+    assert_eq!(
+        decoded.suggestions().unwrap().iter().collect::<Vec<_>>(),
+        ["perché", "perche", "perciò"]
+    );
+    assert_eq!(decoded.languages().unwrap().iter().collect::<Vec<_>>(), ["en", "it"]);
+
+    let none = TextPrediction { correction: None, ..prediction };
+    let bytes = bridge.encode_text_prediction(&none).unwrap().to_vec();
+    let decoded = fb::root_as_envelope(&bytes).unwrap().payload_as_text_prediction().unwrap();
+    assert_eq!(decoded.correction(), None);
+}

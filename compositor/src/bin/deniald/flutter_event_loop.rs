@@ -137,6 +137,27 @@ fn start_orientation_sensor(
     }
 }
 
+fn start_text_prediction(
+    event_loop: &mut EventLoop<'_, RuntimeState>,
+) -> Result<Option<text_prediction::TextPredictionService>, Box<dyn Error>> {
+    match text_prediction::TextPredictionService::start() {
+        Ok((service, source)) => {
+            event_loop
+                .handle()
+                .insert_source(source, |event, _, state: &mut RuntimeState| {
+                    if let ChannelEvent::Msg(prediction) = event {
+                        state.pending_text_prediction = Some(prediction);
+                    }
+                })?;
+            Ok(Some(service))
+        }
+        Err(error) => {
+            warn!(%error, "could not start the keyboard word suggestions");
+            Ok(None)
+        }
+    }
+}
+
 fn synchronize_software_dimming(
     drm: &mut DrmDevice,
     scanouts: &[Scanout],
@@ -2601,6 +2622,7 @@ pub(super) fn run_flutter_event_loop(
         warn!(%error, path = %settings_path.display(), "could not watch Denial settings for external edits");
     }
     let _orientation_sensor = start_orientation_sensor(event_loop)?;
+    events.text_prediction = start_text_prediction(event_loop)?;
     let (volition_wake, volition_wake_source) = make_ping()?;
     // Queued Volition records are acknowledged at the top of each iteration.
     event_loop

@@ -309,6 +309,59 @@ impl WireBridge {
         Ok(self.outbound_builder.finished_data())
     }
 
+    pub fn encode_text_prediction(&mut self, prediction: &TextPrediction) -> Result<&[u8], WireError> {
+        let strings = std::iter::once(&prediction.word)
+            .chain(&prediction.correction)
+            .chain(&prediction.suggestions)
+            .chain(&prediction.languages);
+        if prediction.suggestions.len() > MAX_PREDICTION_SUGGESTIONS
+            || prediction.languages.len() > 8
+            || strings.into_iter().any(|value| value.len() > MAX_STRING_BYTES)
+        {
+            return Err(WireError::Payload);
+        }
+        let sequence = self.take_sequence();
+        let builder = &mut self.outbound_builder;
+        builder.reset();
+        let word = builder.create_string(&prediction.word);
+        let correction = prediction.correction.as_deref().map(|value| builder.create_string(value));
+        let suggestions: Vec<_> = prediction
+            .suggestions
+            .iter()
+            .map(|value| builder.create_string(value))
+            .collect();
+        let suggestions = builder.create_vector(&suggestions);
+        let languages: Vec<_> = prediction
+            .languages
+            .iter()
+            .map(|value| builder.create_string(value))
+            .collect();
+        let languages = builder.create_vector(&languages);
+        let payload = fb::TextPrediction::create(
+            builder,
+            &fb::TextPredictionArgs {
+                serial: prediction.serial,
+                word: Some(word),
+                correction,
+                suggestions: Some(suggestions),
+                languages: Some(languages),
+            },
+        );
+        let envelope = fb::Envelope::create(
+            builder,
+            &fb::EnvelopeArgs {
+                protocol_version: PROTOCOL_VERSION,
+                sequence,
+                request_id: 0,
+                payload_type: fb::Payload::TextPrediction,
+                payload: Some(payload.as_union_value()),
+            },
+        );
+        fb::finish_envelope_buffer(builder, envelope);
+        validate_finished_message(builder)?;
+        Ok(self.outbound_builder.finished_data())
+    }
+
     pub fn encode_text_input_state(
         &mut self,
         active: bool,

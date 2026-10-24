@@ -302,6 +302,54 @@ void main() {
     expect(command.key, isNull);
   });
 
+  test('keyboard replacement carries the old and the new text', () {
+    final codec = DenialWireCodec();
+    final envelope = Envelope(codec.encodeKeyboardReplace('perche', 'perché'));
+    final command = envelope.payload as KeyboardCommand;
+    expect(command.kind, KeyboardCommandKind.Replace);
+    expect(command.replaced, 'perche');
+    expect(command.text, 'perché');
+    expect(command.flags, 0);
+  });
+
+  test('word suggestions cross the bridge both ways', () {
+    final codec = DenialWireCodec();
+    final request = Envelope(
+      codec.encodeTextPredictionRequest(
+        serial: 9,
+        word: 'teh',
+        touchX: const [0.1, double.nan, -0.2],
+        touchY: const [0.0, double.nan, 0.3],
+        manualCapital: false,
+      ),
+    );
+    expect(request.requestId, 0);
+    final word = request.payload as TextPredictionRequest;
+    expect(word.serial, 9);
+    expect(word.word, 'teh');
+    expect(word.touchX![0], closeTo(0.1, 1e-6));
+    expect(word.touchX![1].isNaN, isTrue);
+    expect(word.touchY![2], closeTo(0.3, 1e-6));
+
+    final answer = EnvelopeObjectBuilder(
+      protocolVersion: denialWireVersion,
+      sequence: 4,
+      payloadType: PayloadTypeId.TextPrediction,
+      payload: TextPredictionObjectBuilder(
+        serial: 9,
+        word: 'teh',
+        correction: 'the',
+        suggestions: const ['they', 'then'],
+        languages: const ['en', 'it'],
+      ),
+    ).toBytes('DENW');
+    final decoded = codec.decodeStructured(ByteData.sublistView(answer));
+    final prediction = decoded!.payload as TextPrediction;
+    expect(prediction.correction, 'the');
+    expect(prediction.suggestions, ['they', 'then']);
+    expect(prediction.languages, ['en', 'it']);
+  });
+
   test('system bar configuration encodes its edge and selected outputs', () {
     final codec = DenialWireCodec();
     final bytes = codec.encodeSystemBarConfiguration(

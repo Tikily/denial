@@ -391,7 +391,8 @@ enum KeyboardCommandKind {
   Text(0),
   Key(1),
   DismissPanel(2),
-  PanelMotion(3);
+  PanelMotion(3),
+  Replace(4);
 
   final int value;
   const KeyboardCommandKind(this.value);
@@ -402,6 +403,7 @@ enum KeyboardCommandKind {
       case 1: return KeyboardCommandKind.Key;
       case 2: return KeyboardCommandKind.DismissPanel;
       case 3: return KeyboardCommandKind.PanelMotion;
+      case 4: return KeyboardCommandKind.Replace;
       default: throw StateError('Invalid value $value for bit flag enum');
     }
   }
@@ -410,7 +412,7 @@ enum KeyboardCommandKind {
       value == null ? null : KeyboardCommandKind.fromValue(value);
 
   static const int minValue = 0;
-  static const int maxValue = 3;
+  static const int maxValue = 4;
   static const fb.Reader<KeyboardCommandKind> reader = _KeyboardCommandKindReader();
 }
 
@@ -1176,7 +1178,9 @@ enum PayloadTypeId {
   CursorState(19),
   PluginActionCatalog(20),
   PluginActionInvocation(21),
-  PetRequest(22);
+  PetRequest(22),
+  TextPredictionRequest(23),
+  TextPrediction(24);
 
   final int value;
   const PayloadTypeId(this.value);
@@ -1206,6 +1210,8 @@ enum PayloadTypeId {
       case 20: return PayloadTypeId.PluginActionCatalog;
       case 21: return PayloadTypeId.PluginActionInvocation;
       case 22: return PayloadTypeId.PetRequest;
+      case 23: return PayloadTypeId.TextPredictionRequest;
+      case 24: return PayloadTypeId.TextPrediction;
       default: throw StateError('Invalid value $value for bit flag enum');
     }
   }
@@ -1214,7 +1220,7 @@ enum PayloadTypeId {
       value == null ? null : PayloadTypeId.fromValue(value);
 
   static const int minValue = 0;
-  static const int maxValue = 22;
+  static const int maxValue = 24;
   static const fb.Reader<PayloadTypeId> reader = _PayloadTypeIdReader();
 }
 
@@ -3995,10 +4001,11 @@ class KeyboardCommand {
   int get activationSerial => const fb.Uint64Reader().vTableGet(_bc, _bcOffset, 12, 0);
   int get panelHeight => const fb.Uint32Reader().vTableGet(_bc, _bcOffset, 14, 0);
   int get panelDurationMs => const fb.Uint32Reader().vTableGet(_bc, _bcOffset, 16, 0);
+  String? get replaced => const fb.StringReader().vTableGetNullable(_bc, _bcOffset, 18);
 
   @override
   String toString() {
-    return 'KeyboardCommand{kind: ${kind}, text: ${text}, key: ${key}, flags: ${flags}, activationSerial: ${activationSerial}, panelHeight: ${panelHeight}, panelDurationMs: ${panelDurationMs}}';
+    return 'KeyboardCommand{kind: ${kind}, text: ${text}, key: ${key}, flags: ${flags}, activationSerial: ${activationSerial}, panelHeight: ${panelHeight}, panelDurationMs: ${panelDurationMs}, replaced: ${replaced}}';
   }
 }
 
@@ -4016,7 +4023,7 @@ class KeyboardCommandBuilder {
   final fb.Builder fbBuilder;
 
   void begin() {
-    fbBuilder.startTable(7);
+    fbBuilder.startTable(8);
   }
 
   int addKind(KeyboardCommandKind? kind) {
@@ -4047,6 +4054,10 @@ class KeyboardCommandBuilder {
     fbBuilder.addUint32(6, panelDurationMs);
     return fbBuilder.offset;
   }
+  int addReplacedOffset(int? offset) {
+    fbBuilder.addOffset(7, offset);
+    return fbBuilder.offset;
+  }
 
   int finish() {
     return fbBuilder.endTable();
@@ -4061,6 +4072,7 @@ class KeyboardCommandObjectBuilder extends fb.ObjectBuilder {
   final int? _activationSerial;
   final int? _panelHeight;
   final int? _panelDurationMs;
+  final String? _replaced;
 
   KeyboardCommandObjectBuilder({
     KeyboardCommandKind? kind,
@@ -4070,6 +4082,7 @@ class KeyboardCommandObjectBuilder extends fb.ObjectBuilder {
     int? activationSerial,
     int? panelHeight,
     int? panelDurationMs,
+    String? replaced,
   })
       : _kind = kind,
         _text = text,
@@ -4077,7 +4090,8 @@ class KeyboardCommandObjectBuilder extends fb.ObjectBuilder {
         _flags = flags,
         _activationSerial = activationSerial,
         _panelHeight = panelHeight,
-        _panelDurationMs = panelDurationMs;
+        _panelDurationMs = panelDurationMs,
+        _replaced = replaced;
 
   /// Finish building, and store into the [fbBuilder].
   @override
@@ -4086,7 +4100,9 @@ class KeyboardCommandObjectBuilder extends fb.ObjectBuilder {
         : fbBuilder.writeString(_text!);
     final int? keyOffset = _key == null ? null
         : fbBuilder.writeString(_key!);
-    fbBuilder.startTable(7);
+    final int? replacedOffset = _replaced == null ? null
+        : fbBuilder.writeString(_replaced!);
+    fbBuilder.startTable(8);
     fbBuilder.addUint8(0, _kind?.value);
     fbBuilder.addOffset(1, textOffset);
     fbBuilder.addOffset(2, keyOffset);
@@ -4094,6 +4110,235 @@ class KeyboardCommandObjectBuilder extends fb.ObjectBuilder {
     fbBuilder.addUint64(4, _activationSerial);
     fbBuilder.addUint32(5, _panelHeight);
     fbBuilder.addUint32(6, _panelDurationMs);
+    fbBuilder.addOffset(7, replacedOffset);
+    return fbBuilder.endTable();
+  }
+
+  /// Convenience method to serialize to byte list.
+  @override
+  Uint8List toBytes([String? fileIdentifier]) {
+    final fbBuilder = fb.Builder(deduplicateTables: false);
+    fbBuilder.finish(finish(fbBuilder), fileIdentifier);
+    return fbBuilder.buffer;
+  }
+}
+class TextPredictionRequest {
+  TextPredictionRequest._(this._bc, this._bcOffset);
+  factory TextPredictionRequest(List<int> bytes) {
+    final rootRef = fb.BufferContext.fromBytes(bytes);
+    return reader.read(rootRef, 0);
+  }
+
+  static const fb.Reader<TextPredictionRequest> reader = _TextPredictionRequestReader();
+
+  final fb.BufferContext _bc;
+  final int _bcOffset;
+
+  int get serial => const fb.Uint64Reader().vTableGet(_bc, _bcOffset, 4, 0);
+  String? get word => const fb.StringReader().vTableGetNullable(_bc, _bcOffset, 6);
+  List<double>? get touchX => const fb.ListReader<double>(fb.Float32Reader()).vTableGetNullable(_bc, _bcOffset, 8);
+  List<double>? get touchY => const fb.ListReader<double>(fb.Float32Reader()).vTableGetNullable(_bc, _bcOffset, 10);
+  bool get manualCapital => const fb.BoolReader().vTableGet(_bc, _bcOffset, 12, false);
+
+  @override
+  String toString() {
+    return 'TextPredictionRequest{serial: ${serial}, word: ${word}, touchX: ${touchX}, touchY: ${touchY}, manualCapital: ${manualCapital}}';
+  }
+}
+
+class _TextPredictionRequestReader extends fb.TableReader<TextPredictionRequest> {
+  const _TextPredictionRequestReader();
+
+  @override
+  TextPredictionRequest createObject(fb.BufferContext bc, int offset) => 
+    TextPredictionRequest._(bc, offset);
+}
+
+class TextPredictionRequestBuilder {
+  TextPredictionRequestBuilder(this.fbBuilder);
+
+  final fb.Builder fbBuilder;
+
+  void begin() {
+    fbBuilder.startTable(5);
+  }
+
+  int addSerial(int? serial) {
+    fbBuilder.addUint64(0, serial);
+    return fbBuilder.offset;
+  }
+  int addWordOffset(int? offset) {
+    fbBuilder.addOffset(1, offset);
+    return fbBuilder.offset;
+  }
+  int addTouchXOffset(int? offset) {
+    fbBuilder.addOffset(2, offset);
+    return fbBuilder.offset;
+  }
+  int addTouchYOffset(int? offset) {
+    fbBuilder.addOffset(3, offset);
+    return fbBuilder.offset;
+  }
+  int addManualCapital(bool? manualCapital) {
+    fbBuilder.addBool(4, manualCapital);
+    return fbBuilder.offset;
+  }
+
+  int finish() {
+    return fbBuilder.endTable();
+  }
+}
+
+class TextPredictionRequestObjectBuilder extends fb.ObjectBuilder {
+  final int? _serial;
+  final String? _word;
+  final List<double>? _touchX;
+  final List<double>? _touchY;
+  final bool? _manualCapital;
+
+  TextPredictionRequestObjectBuilder({
+    int? serial,
+    String? word,
+    List<double>? touchX,
+    List<double>? touchY,
+    bool? manualCapital,
+  })
+      : _serial = serial,
+        _word = word,
+        _touchX = touchX,
+        _touchY = touchY,
+        _manualCapital = manualCapital;
+
+  /// Finish building, and store into the [fbBuilder].
+  @override
+  int finish(fb.Builder fbBuilder) {
+    final int? wordOffset = _word == null ? null
+        : fbBuilder.writeString(_word!);
+    final int? touchXOffset = _touchX == null ? null
+        : fbBuilder.writeListFloat32(_touchX!);
+    final int? touchYOffset = _touchY == null ? null
+        : fbBuilder.writeListFloat32(_touchY!);
+    fbBuilder.startTable(5);
+    fbBuilder.addUint64(0, _serial);
+    fbBuilder.addOffset(1, wordOffset);
+    fbBuilder.addOffset(2, touchXOffset);
+    fbBuilder.addOffset(3, touchYOffset);
+    fbBuilder.addBool(4, _manualCapital);
+    return fbBuilder.endTable();
+  }
+
+  /// Convenience method to serialize to byte list.
+  @override
+  Uint8List toBytes([String? fileIdentifier]) {
+    final fbBuilder = fb.Builder(deduplicateTables: false);
+    fbBuilder.finish(finish(fbBuilder), fileIdentifier);
+    return fbBuilder.buffer;
+  }
+}
+class TextPrediction {
+  TextPrediction._(this._bc, this._bcOffset);
+  factory TextPrediction(List<int> bytes) {
+    final rootRef = fb.BufferContext.fromBytes(bytes);
+    return reader.read(rootRef, 0);
+  }
+
+  static const fb.Reader<TextPrediction> reader = _TextPredictionReader();
+
+  final fb.BufferContext _bc;
+  final int _bcOffset;
+
+  int get serial => const fb.Uint64Reader().vTableGet(_bc, _bcOffset, 4, 0);
+  String? get word => const fb.StringReader().vTableGetNullable(_bc, _bcOffset, 6);
+  String? get correction => const fb.StringReader().vTableGetNullable(_bc, _bcOffset, 8);
+  List<String>? get suggestions => const fb.ListReader<String>(fb.StringReader()).vTableGetNullable(_bc, _bcOffset, 10);
+  List<String>? get languages => const fb.ListReader<String>(fb.StringReader()).vTableGetNullable(_bc, _bcOffset, 12);
+
+  @override
+  String toString() {
+    return 'TextPrediction{serial: ${serial}, word: ${word}, correction: ${correction}, suggestions: ${suggestions}, languages: ${languages}}';
+  }
+}
+
+class _TextPredictionReader extends fb.TableReader<TextPrediction> {
+  const _TextPredictionReader();
+
+  @override
+  TextPrediction createObject(fb.BufferContext bc, int offset) => 
+    TextPrediction._(bc, offset);
+}
+
+class TextPredictionBuilder {
+  TextPredictionBuilder(this.fbBuilder);
+
+  final fb.Builder fbBuilder;
+
+  void begin() {
+    fbBuilder.startTable(5);
+  }
+
+  int addSerial(int? serial) {
+    fbBuilder.addUint64(0, serial);
+    return fbBuilder.offset;
+  }
+  int addWordOffset(int? offset) {
+    fbBuilder.addOffset(1, offset);
+    return fbBuilder.offset;
+  }
+  int addCorrectionOffset(int? offset) {
+    fbBuilder.addOffset(2, offset);
+    return fbBuilder.offset;
+  }
+  int addSuggestionsOffset(int? offset) {
+    fbBuilder.addOffset(3, offset);
+    return fbBuilder.offset;
+  }
+  int addLanguagesOffset(int? offset) {
+    fbBuilder.addOffset(4, offset);
+    return fbBuilder.offset;
+  }
+
+  int finish() {
+    return fbBuilder.endTable();
+  }
+}
+
+class TextPredictionObjectBuilder extends fb.ObjectBuilder {
+  final int? _serial;
+  final String? _word;
+  final String? _correction;
+  final List<String>? _suggestions;
+  final List<String>? _languages;
+
+  TextPredictionObjectBuilder({
+    int? serial,
+    String? word,
+    String? correction,
+    List<String>? suggestions,
+    List<String>? languages,
+  })
+      : _serial = serial,
+        _word = word,
+        _correction = correction,
+        _suggestions = suggestions,
+        _languages = languages;
+
+  /// Finish building, and store into the [fbBuilder].
+  @override
+  int finish(fb.Builder fbBuilder) {
+    final int? wordOffset = _word == null ? null
+        : fbBuilder.writeString(_word!);
+    final int? correctionOffset = _correction == null ? null
+        : fbBuilder.writeString(_correction!);
+    final int? suggestionsOffset = _suggestions == null ? null
+        : fbBuilder.writeList(_suggestions!.map(fbBuilder.writeString).toList());
+    final int? languagesOffset = _languages == null ? null
+        : fbBuilder.writeList(_languages!.map(fbBuilder.writeString).toList());
+    fbBuilder.startTable(5);
+    fbBuilder.addUint64(0, _serial);
+    fbBuilder.addOffset(1, wordOffset);
+    fbBuilder.addOffset(2, correctionOffset);
+    fbBuilder.addOffset(3, suggestionsOffset);
+    fbBuilder.addOffset(4, languagesOffset);
     return fbBuilder.endTable();
   }
 
@@ -7146,6 +7391,8 @@ class Envelope {
       case 20: return PluginActionCatalog.reader.vTableGetNullable(_bc, _bcOffset, 12);
       case 21: return PluginActionInvocation.reader.vTableGetNullable(_bc, _bcOffset, 12);
       case 22: return PetRequest.reader.vTableGetNullable(_bc, _bcOffset, 12);
+      case 23: return TextPredictionRequest.reader.vTableGetNullable(_bc, _bcOffset, 12);
+      case 24: return TextPrediction.reader.vTableGetNullable(_bc, _bcOffset, 12);
       default: return null;
     }
   }

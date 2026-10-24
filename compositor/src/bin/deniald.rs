@@ -87,6 +87,9 @@ mod options;
 #[path = "deniald/orientation_sensor.rs"]
 mod orientation_sensor;
 #[cfg(feature = "flutter")]
+#[path = "deniald/text_prediction.rs"]
+mod text_prediction;
+#[cfg(feature = "flutter")]
 #[path = "deniald/output_control.rs"]
 mod output_control;
 #[path = "deniald/output_policy.rs"]
