@@ -909,6 +909,9 @@ build_plugin_manager() (
             --output="$BUILD_ROOT/plugin-manager/denial-plugins.new"
         mv -f -- "$BUILD_ROOT/plugin-manager/denial-plugins.new" "$BUILD_ROOT/plugin-manager/denial-plugins"
     )
+    # The manager runs the Dart it finds first on PATH, and a development kit
+    # attests this SDK's compiler: tools/denial-plugins puts it first.
+    ln -sfn -- "$(dirname -- "$dart")" "$BUILD_ROOT/plugin-manager/dart-bin"
     local app_bundle="$ROOT/plugin_manager_app/build/linux/$DENIAL_FLUTTER_ARCH/release/bundle"
     # Keep metadata beside the native application after publishing its bundle.
     python3 - "$BUILD_ROOT/plugin-manager" "$RUST_TARGET/release/denialctl" \
@@ -1247,10 +1250,11 @@ run_compositor() {
     export DENIA_SHELL_PROFILE="$shell_profile"
     export DENIAL_SETTINGS_BINARY="$SETTINGS_BINARY"
     # After a Denial update deniald rebuilds the user's plugins with the
-    # locally built Plugin Manager backend, when there is one.
+    # locally built Plugin Manager backend, when there is one, through the
+    # wrapper that runs it with the Dart SDK it was built with.
     if [[ -z "${DENIAL_PLUGINS_BINARY:-}" \
         && -x "$BUILD_ROOT/plugin-manager/denial-plugins" ]]; then
-        export DENIAL_PLUGINS_BINARY="$BUILD_ROOT/plugin-manager/denial-plugins"
+        export DENIAL_PLUGINS_BINARY="$SCRIPT_DIR/denial-plugins"
     fi
     export RUST_BACKTRACE=1
     export RUST_LOG="${DENIAL_RUST_LOG-${DENIA_RUST_LOG-deniald=info,smithay=warn}}"
