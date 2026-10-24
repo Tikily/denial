@@ -324,12 +324,8 @@ DENIAL_FPRINT_TEST_BUS=1 dbus-run-session -- \
 
 ## Renderer selection
 
-Official Denial engines are Slimpeller builds. They run Impeller GLES; Skia's
-Ganesh and Graphite renderers are omitted.
-
-The low-level `--flutter-renderer` switch remains available for developers who
-pair deniald with a custom non-Slimpeller engine, but packaged and PC
-development sessions use Impeller.
+Denial engines are Slimpeller builds: deniald always runs Flutter on Impeller
+GLES, and Skia's Ganesh and Graphite renderers are not compiled.
 
 Denial environment variables use the `DENIAL_*` prefix. The former `DENIA_*`
 spellings remain compatibility aliases during the transition; when both forms

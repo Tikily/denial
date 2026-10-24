@@ -26,7 +26,6 @@ fn configuration(buffers: &[Dmabuf]) -> PreparedRendererConfiguration {
             dmabufs: buffers.iter().map(|buffer| (buffer, None)).collect(),
         }],
         PixelSize::new(1920, 1080),
-        RendererBackend::ImpellerGles,
         false,
     )
 }
@@ -58,7 +57,6 @@ fn prepared_pool_rejects_stale_topology_and_renderer_configuration() {
         |config| config.pools[0].configuration_generation += 1,
         |config| config.pools[0].size = PixelSize::new(3840, 2160),
         |config| config.desktop_size = PixelSize::new(4480, 1440),
-        |config| config.renderer_backend = RendererBackend::SkiaGles,
         |config| config.offscreen_blit = true,
         |config| {
             config.pools.clear();
@@ -87,14 +85,8 @@ fn prepared_blit_pool_requires_the_same_render_allocation() {
         initial_scanout: 0,
         dmabufs: vec![(&scanout, render)],
     };
-    let config = |pool| {
-        PreparedRendererConfiguration::new(
-            &[pool],
-            PixelSize::new(1920, 1080),
-            RendererBackend::ImpellerGles,
-            true,
-        )
-    };
+    let config =
+        |pool| PreparedRendererConfiguration::new(&[pool], PixelSize::new(1920, 1080), true);
     let prepared = config(pool(Some(&render)));
     let cloned_render = render.clone();
     let replacement_render = buffer();

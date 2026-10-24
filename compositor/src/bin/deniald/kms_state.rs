@@ -1226,7 +1226,6 @@ pub(super) struct LayoutTransition {
 #[cfg(feature = "flutter")]
 pub(super) struct FlutterLauncher {
     factory: Option<flutter_runtime::FlutterRuntimeFactory>,
-    renderer_backend: denial_flutter_engine::RendererBackend,
     offscreen_blit: bool,
     active_mode: ui_development::UiRuntimeMode,
     resident_jit_engine_fingerprint: Option<[u8; 32]>,
@@ -1244,7 +1243,6 @@ pub(super) struct FlutterLauncher {
 #[cfg(feature = "flutter")]
 pub(super) struct FlutterLaunchConfiguration<'a> {
     pub(super) bundle: &'a Path,
-    pub(super) renderer_backend: denial_flutter_engine::RendererBackend,
     pub(super) offscreen_blit: bool,
     pub(super) debug_bundle: Option<PathBuf>,
     pub(super) ui_workspace: Option<PathBuf>,
@@ -1274,9 +1272,7 @@ impl FlutterLauncher {
             factory: Some(flutter_runtime::FlutterRuntimeFactory::new(
                 configuration.bundle,
                 denial_flutter_engine::DartRuntimeMode::Aot,
-                configuration.renderer_backend,
             )?),
-            renderer_backend: configuration.renderer_backend,
             offscreen_blit: configuration.offscreen_blit,
             active_mode: ui_development::UiRuntimeMode::OfficialOptimized,
             resident_jit_engine_fingerprint: None,
@@ -1306,7 +1302,6 @@ impl FlutterLauncher {
             renderer.egl_context(),
             flutter_render_target_pools(swapchains),
             desktop_size,
-            self.renderer_backend,
             self.offscreen_blit,
             self.events.clone(),
         )
@@ -1517,14 +1512,9 @@ impl FlutterLauncher {
                         .bundle_for(ui_development::UiRuntimeMode::OfficialOptimized)
                         .expect("packaged recovery bundle"),
                     runtime,
-                    self.renderer_backend,
                 )?
             } else {
-                flutter_runtime::FlutterRuntimeFactory::new(
-                    &bundle,
-                    runtime,
-                    self.renderer_backend,
-                )?
+                flutter_runtime::FlutterRuntimeFactory::new(&bundle, runtime)?
             },
         );
         if let Some(fingerprint) = jit_engine_fingerprint {

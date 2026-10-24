@@ -27,7 +27,7 @@ use denial_flutter_engine::{
     BackingStoreRequest, CompositorBackingStore, DartRuntimeMode, EngineError, EngineEvent,
     EngineHost, EngineLibrary, EngineLocale, EngineProject, OpenGlHandler, PlatformMessage,
     PresentFrame, PresentView, RenderOutput, RenderOutputFfiScratch, RenderOutputTransform,
-    RendererBackend, ScheduledTask, sys,
+    ScheduledTask, sys,
 };
 use sha2::{Digest, Sha256};
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -202,10 +202,9 @@ impl FlutterRuntimeFactory {
         bundle: &Path,
         engine_bundle: &Path,
         runtime: DartRuntimeMode,
-        renderer_backend: RendererBackend,
     ) -> Result<Self, Box<dyn Error>> {
-        let mut project = project_from_bundle(bundle, runtime, renderer_backend)?;
-        let official = project_from_bundle(engine_bundle, DartRuntimeMode::Aot, renderer_backend)?;
+        let mut project = project_from_bundle(bundle, runtime)?;
+        let official = project_from_bundle(engine_bundle, DartRuntimeMode::Aot)?;
         project.engine_library = official.engine_library;
         let library = Arc::new(EngineLibrary::load(&project.engine_library)?);
         Ok(Self {
@@ -214,12 +213,8 @@ impl FlutterRuntimeFactory {
             library,
         })
     }
-    pub fn new(
-        bundle: &Path,
-        runtime: DartRuntimeMode,
-        renderer_backend: RendererBackend,
-    ) -> Result<Self, Box<dyn Error>> {
-        let project = project_from_bundle(bundle, runtime, renderer_backend)?;
+    pub fn new(bundle: &Path, runtime: DartRuntimeMode) -> Result<Self, Box<dyn Error>> {
+        let project = project_from_bundle(bundle, runtime)?;
         let library = Arc::new(EngineLibrary::load(&project.engine_library)?);
         Ok(Self {
             bundle: bundle.to_owned(),
@@ -638,7 +633,6 @@ impl Drop for FlutterRuntime {
 fn project_from_bundle(
     bundle: &Path,
     runtime: DartRuntimeMode,
-    renderer_backend: RendererBackend,
 ) -> Result<EngineProject, Box<dyn Error>> {
     let engine_library = first_file(&[
         bundle.join("lib/libflutter_engine.so"),
@@ -673,7 +667,6 @@ fn project_from_bundle(
         icu_data,
         runtime,
         aot_library,
-        renderer_backend,
         // Flutter derives 48 bytes per physical viewport pixel, which gives a
         // 5120x1440 virtual desktop a 337.5 MiB cache. Keep the official
         // adaptive behavior below the cap while preventing large multi-output

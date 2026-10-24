@@ -1260,8 +1260,7 @@ run_compositor() {
         --wayland \
         "${xwayland_arguments[@]}" \
         "${polkit_arguments[@]}" \
-        --flutter-bundle "$BUNDLE" \
-        --flutter-renderer impeller <&0 &
+        --flutter-bundle "$BUNDLE" <&0 &
     DENIAL_SESSION_PID=$!
     local status=0
     wait "$DENIAL_SESSION_PID" || status=$?

@@ -746,7 +746,6 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
         Some(FlutterLauncher::new(
             FlutterLaunchConfiguration {
                 bundle,
-                renderer_backend: options.flutter_renderer,
                 offscreen_blit: options.flutter_offscreen_blit,
                 debug_bundle: options.flutter_debug_bundle.clone(),
                 ui_workspace: options.flutter_ui_workspace.clone(),

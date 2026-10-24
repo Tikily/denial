@@ -41,8 +41,8 @@ type SetTexturePresentationCallback = unsafe extern "C" fn(
 
 pub use host::{
     BackingStoreRequest, CompositorBackingStore, DartRuntimeMode, EngineEvent, EngineHost,
-    EngineProject, HostError, OpenGlHandler, ParseRendererBackendError, PlatformMessage,
-    PresentFrame, PresentView, RendererBackend, ScheduledTask,
+    EngineProject, HostError, OpenGlHandler, PlatformMessage, PresentFrame, PresentView,
+    ScheduledTask,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]

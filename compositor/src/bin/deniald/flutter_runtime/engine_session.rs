@@ -31,7 +31,6 @@ struct PreparedOutputPool {
 struct PreparedRendererConfiguration {
     pools: Vec<PreparedOutputPool>,
     desktop_size: PixelSize,
-    renderer_backend: RendererBackend,
     offscreen_blit: bool,
 }
 
@@ -39,7 +38,6 @@ impl PreparedRendererConfiguration {
     fn new(
         pools: &[OutputRenderTargetPool<'_>],
         desktop_size: PixelSize,
-        renderer_backend: RendererBackend,
         offscreen_blit: bool,
     ) -> Self {
         Self {
@@ -68,7 +66,6 @@ impl PreparedRendererConfiguration {
                 })
                 .collect(),
             desktop_size,
-            renderer_backend,
             offscreen_blit,
         }
     }
@@ -86,17 +83,12 @@ impl PreparedFlutterRenderer {
         shared_context: &EGLContext,
         output_pools: impl IntoIterator<Item = OutputRenderTargetPool<'a>>,
         desktop_size: PixelSize,
-        renderer_backend: RendererBackend,
         offscreen_blit: bool,
         events: Sender<RuntimeEvent>,
     ) -> Result<Self, Box<dyn Error>> {
         let output_pools = output_pools.into_iter().collect::<Vec<_>>();
-        let configuration = PreparedRendererConfiguration::new(
-            &output_pools,
-            desktop_size,
-            renderer_backend,
-            offscreen_blit,
-        );
+        let configuration =
+            PreparedRendererConfiguration::new(&output_pools, desktop_size, offscreen_blit);
         let render_context = egl_context::create_shared_context("Flutter raster", shared_context)?;
         let resource_context =
             egl_context::create_shared_context("Flutter resource", shared_context)?;
@@ -105,7 +97,6 @@ impl PreparedFlutterRenderer {
             resource_context,
             output_pools,
             desktop_size,
-            renderer_backend,
             offscreen_blit,
             events,
             0,
@@ -187,19 +178,14 @@ impl FlutterRuntime {
             })
             .collect::<Vec<_>>();
         let output_pools = output_pools.into_iter().collect::<Vec<_>>();
-        let expected = PreparedRendererConfiguration::new(
-            &output_pools,
-            atlas.pixel_size,
-            factory.project.renderer_backend,
-            offscreen_blit,
-        );
+        let expected =
+            PreparedRendererConfiguration::new(&output_pools, atlas.pixel_size, offscreen_blit);
         let prepared = match prepared {
             Some(prepared) => prepared,
             None => PreparedFlutterRenderer::new(
                 shared_context,
                 output_pools,
                 atlas.pixel_size,
-                factory.project.renderer_backend,
                 offscreen_blit,
                 events,
             )?,

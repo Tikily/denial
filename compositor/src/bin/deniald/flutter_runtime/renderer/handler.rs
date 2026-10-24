@@ -71,7 +71,6 @@ impl FlutterGlHandler {
         resource_context: egl_context::SharedEglContext,
         output_pools: impl IntoIterator<Item = OutputRenderTargetPool<'a>>,
         desktop_size: PixelSize,
-        renderer_backend: RendererBackend,
         offscreen_blit: bool,
         events: Sender<RuntimeEvent>,
         generation: u64,
@@ -83,10 +82,8 @@ impl FlutterGlHandler {
         let gl = GlApi::load()?;
         let render_audit_active = render_audit_enabled();
         let gpu_timing = render_audit_active.then(GpuTimingState::load).flatten();
-        let needs_depth_stencil = renderer_backend == RendererBackend::ImpellerGles;
         let mut depth_stencils = Vec::new();
         info!(
-            %renderer_backend,
             offscreen_blit,
             "creating Flutter physical-output texture targets"
         );
@@ -100,37 +97,30 @@ impl FlutterGlHandler {
             let height = i32::try_from(pool.size.height)
                 .map_err(|_| "Flutter output height exceeds GLES")?;
             let mut depth_stencil = 0;
-            if needs_depth_stencil {
-                // Impeller wraps Denial's supplied FBO. One packed attachment can
-                // be shared by one output's rotating FBOs because the raster
-                // runner is serial and clears it for each render pass.
-                // SAFETY: this new GLES context is current and the arguments and
-                // output pointer are valid.
-                unsafe {
-                    let _ = (gl.get_error)();
-                    (gl.gen_renderbuffers)(1, &mut depth_stencil);
-                    (gl.bind_renderbuffer)(gl::RENDERBUFFER, depth_stencil);
-                    (gl.renderbuffer_storage)(
-                        gl::RENDERBUFFER,
-                        gl::DEPTH24_STENCIL8,
-                        width,
-                        height,
-                    );
-                }
-                // SAFETY: the same GLES context remains current.
-                let allocation_error = unsafe { (gl.get_error)() };
-                depth_stencils.push(depth_stencil);
-                if depth_stencil == 0 || allocation_error != gl::NO_ERROR {
-                    warn!(
-                        renderbuffer = depth_stencil,
-                        error = format_args!("{allocation_error:#x}"),
-                        "Impeller GLES depth/stencil allocation failed"
-                    );
-                    destroy_depth_stencils(gl, &mut depth_stencils);
-                    destroy_targets(gl, &display, &mut targets);
-                    render_context.unbind()?;
-                    return Err("could not allocate Impeller GLES depth/stencil storage".into());
-                }
+            // Impeller wraps Denial's supplied FBO. One packed attachment can
+            // be shared by one output's rotating FBOs because the raster
+            // runner is serial and clears it for each render pass.
+            // SAFETY: this new GLES context is current and the arguments and
+            // output pointer are valid.
+            unsafe {
+                let _ = (gl.get_error)();
+                (gl.gen_renderbuffers)(1, &mut depth_stencil);
+                (gl.bind_renderbuffer)(gl::RENDERBUFFER, depth_stencil);
+                (gl.renderbuffer_storage)(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, width, height);
+            }
+            // SAFETY: the same GLES context remains current.
+            let allocation_error = unsafe { (gl.get_error)() };
+            depth_stencils.push(depth_stencil);
+            if depth_stencil == 0 || allocation_error != gl::NO_ERROR {
+                warn!(
+                    renderbuffer = depth_stencil,
+                    error = format_args!("{allocation_error:#x}"),
+                    "Impeller GLES depth/stencil allocation failed"
+                );
+                destroy_depth_stencils(gl, &mut depth_stencils);
+                destroy_targets(gl, &display, &mut targets);
+                render_context.unbind()?;
+                return Err("could not allocate Impeller GLES depth/stencil storage".into());
             }
 
             let target_start = targets.len();
@@ -223,9 +213,7 @@ impl FlutterGlHandler {
                     let attachment_error = (gl.get_error)();
                     let status = (gl.check_framebuffer_status)(gl::FRAMEBUFFER);
                     (gl.get_integer_v)(gl::SAMPLES, &mut actual_samples);
-                    if needs_depth_stencil {
-                        (gl.get_integer_v)(gl::STENCIL_BITS, &mut actual_stencil_bits);
-                    }
+                    (gl.get_integer_v)(gl::STENCIL_BITS, &mut actual_stencil_bits);
                     (status, attachment_error)
                 };
                 if target.scanout_texture == 0
@@ -234,7 +222,7 @@ impl FlutterGlHandler {
                     || attachment_error != gl::NO_ERROR
                     || framebuffer_status != gl::FRAMEBUFFER_COMPLETE
                     || (!offscreen_blit && actual_samples > 1)
-                    || (!offscreen_blit && needs_depth_stencil && actual_stencil_bits < 8)
+                    || (!offscreen_blit && actual_stencil_bits < 8)
                 {
                     warn!(
                         output = ?pool.output_id,
@@ -357,9 +345,7 @@ impl FlutterGlHandler {
                     let render_status = unsafe {
                         let status = (gl.check_framebuffer_status)(gl::FRAMEBUFFER);
                         (gl.get_integer_v)(gl::SAMPLES, &mut actual_samples);
-                        if needs_depth_stencil {
-                            (gl.get_integer_v)(gl::STENCIL_BITS, &mut actual_stencil_bits);
-                        }
+                        (gl.get_integer_v)(gl::STENCIL_BITS, &mut actual_stencil_bits);
                         status
                     };
                     // SAFETY: querying the current context's error queue has no
@@ -370,7 +356,7 @@ impl FlutterGlHandler {
                         || render_status != gl::FRAMEBUFFER_COMPLETE
                         || render_error != gl::NO_ERROR
                         || actual_samples > 1
-                        || (needs_depth_stencil && actual_stencil_bits < 8)
+                        || actual_stencil_bits < 8
                     {
                         warn!(
                             texture = target.render_texture,

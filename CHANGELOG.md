@@ -64,6 +64,12 @@ boundaries may change before 1.0.
 - Branch and release validation now build and independently verify Alpine APK
   payloads in a pinned Alpine minirootfs on the CachyOS runner.
 
+### Removed
+
+- The Skia renderer. Denial engines are Impeller-only Slimpeller builds, and
+  deniald no longer accepts `--flutter-renderer`; `denial-app` no longer
+  accepts `--renderer`.
+
 ### Fixed
 
 - KMS-only compositor builds now keep shared hotplug and Wayland behavior

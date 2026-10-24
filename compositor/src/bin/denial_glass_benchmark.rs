@@ -23,7 +23,7 @@ use denial_core::topology::{OutputId, PixelSize, RenderViewId};
 use denial_flutter_engine::{
     BackingStoreRequest, CompositorBackingStore, DartRuntimeMode, EngineEvent, EngineHost,
     EngineLibrary, EngineProject, OpenGlHandler, PresentFrame, PresentView, RenderOutput,
-    RenderOutputTransform, RendererBackend, ScheduledTask, sys,
+    RenderOutputTransform, ScheduledTask, sys,
 };
 use sha2::{Digest, Sha256};
 use smithay::backend::allocator::dmabuf::{AsDmabuf, Dmabuf};
@@ -1129,7 +1129,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         icu_data: bundle.join("data/icudtl.dat"),
         runtime: DartRuntimeMode::AotProfile,
         aot_library: Some(bundle.join("lib/libapp.so")),
-        renderer_backend: RendererBackend::ImpellerGles,
         resource_cache_max_bytes_threshold: 0,
     };
     let library = Arc::new(EngineLibrary::load(&project.engine_library)?);
