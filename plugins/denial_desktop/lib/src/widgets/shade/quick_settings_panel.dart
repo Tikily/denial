@@ -34,9 +34,9 @@ import '../session/power_session_surface.dart';
 
 import 'package:denial_flutter_sdk/effects.dart';
 
+import '../liquid/water_reveal.dart';
+import 'liquid_range_bar.dart';
 import 'quick_settings_tiles.dart';
-
-import 'package:denial_flutter_sdk/controls.dart';
 
 import 'mobile_notification_history.dart';
 import 'shade_backdrop_scene.dart';
@@ -601,10 +601,12 @@ class _ControlCenterPage extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 28),
                 child: Align(
                   alignment: AlignmentDirectional.centerEnd,
-                  child: ColorOsShadeElementReveal(
+                  // Water, like the tiles: it follows the shade and is
+                  // gone before the shade is.
+                  child: WaterReveal(
                     progress: progress,
-                    threshold: ColorOsShadeMotion.firstElementThreshold,
-                    fade: false,
+                    start: 0.4,
+                    span: 0.3,
                     child: const _ShadeHeaderActions(),
                   ),
                 ),
@@ -826,13 +828,11 @@ class _BrightnessRangeBar extends ConsumerWidget {
       ),
     );
     final controller = ref.read(displayBrightnessProvider.notifier);
-    return VerticalRangeBar(
-      translucentTrack: true,
+    return LiquidRangeBar(
       iconScale: ShadeReferenceGeometry.inverseScaleOf(context),
       icon: Icons.brightness_6_rounded,
       value: brightness,
-      activeColor: ShellTheme.of(context).accent,
-      inactiveColor: context.shellColors.brightnessTrack,
+      trackColor: context.shellColors.brightnessTrack,
       onChanged: (value) {
         if (output != null) controller.setLevel(output, value);
       },
@@ -852,16 +852,15 @@ class _VolumeRangeBar extends ConsumerWidget {
       quickSettingsProvider.select((state) => state.volume),
     );
     final controller = ref.read(quickSettingsProvider.notifier);
-    return VerticalRangeBar(
-      translucentTrack: true,
+    return LiquidRangeBar(
       iconScale: ShadeReferenceGeometry.inverseScaleOf(context),
       icon: Icons.volume_up_rounded,
       value: volume,
-      activeColor: ShellTheme.of(context).accent,
-      inactiveColor: context.shellColors.volumeTrack,
+      trackColor: context.shellColors.volumeTrack,
+      // The bar shows the level itself: no volume indicator over the shade.
       onChangeStart: controller.beginVolumeInteraction,
-      onChanged: controller.setVolume,
-      onChangeEnd: controller.commitVolume,
+      onChanged: controller.setDashboardVolume,
+      onChangeEnd: controller.commitDashboardVolume,
     );
   }
 }

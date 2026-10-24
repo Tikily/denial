@@ -2,17 +2,19 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart'
     show CircularProgressIndicator, Icons, IconData, Tooltip;
+import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'package:denial_flutter_sdk/localization.dart';
 import 'package:denial_flutter_sdk/system_services.dart';
 import 'package:denial_flutter_sdk/glass_configuration.dart';
-import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/effects.dart';
 
-import 'shade_expansion_motion.dart';
+import '../liquid/liquid.dart';
+import '../liquid/water_reveal.dart';
 import 'shade_reference_geometry.dart';
 
 abstract final class QuickSettingsGridMetrics {
@@ -88,16 +90,17 @@ class QuickSettingsTiles extends StatelessWidget {
     final l10n = context.l10n;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final lastNode = 6 + footerTiles.length;
-        Widget reveal(int index, Widget child) {
+        // Water runs down the grid with the shade: each row starts filling
+        // a little after the one above, and within a row left to right.
+        // Closing, the lowest rows drain first, all of it before the
+        // shade's blur fades.
+        Widget reveal(int index, Widget child, {required (int, int) cell}) {
           final progress = expansionProgress;
           if (progress == null) return child;
-          return ColorOsShadeElementReveal(
+          final (row, column) = cell;
+          return WaterReveal(
             progress: progress,
-            threshold: ColorOsShadeMotion.contentElementThreshold,
-            delay: ColorOsShadeMotion.nodeStagger * index,
-            exitDelay: ColorOsShadeMotion.exitStagger * (lastNode - index),
-            fade: false,
+            start: 0.33 + 0.05 * row + 0.01 * column,
             child: child,
           );
         }
@@ -117,10 +120,10 @@ class QuickSettingsTiles extends StatelessWidget {
         final footerHeight = footerTiles.any((tile) => !tile.wide)
             ? row
             : capsule;
-        final footerLefts = <double>[];
+        final footerColumns = <int>[];
         var footerColumn = 0;
         for (final tile in footerTiles) {
-          footerLefts.add(pitch * footerColumn);
+          footerColumns.add(footerColumn);
           footerColumn += tile.wide ? 2 : 1;
         }
         return SizedBox(
@@ -147,6 +150,7 @@ class QuickSettingsTiles extends StatelessWidget {
                     onDetails: onOpenWifi,
                     wide: true,
                   ),
+                  cell: (0, 0),
                 ),
               ),
               Positioned(
@@ -167,6 +171,7 @@ class QuickSettingsTiles extends StatelessWidget {
                     onDetails: onOpenBluetooth,
                     wide: true,
                   ),
+                  cell: (0, 2),
                 ),
               ),
               Positioned(
@@ -174,14 +179,22 @@ class QuickSettingsTiles extends StatelessWidget {
                 top: row,
                 width: column,
                 height: tall,
-                child: reveal(2, brightnessControl ?? const SizedBox.expand()),
+                child: reveal(
+                  2,
+                  brightnessControl ?? const SizedBox.expand(),
+                  cell: (1, 0),
+                ),
               ),
               Positioned(
                 left: pitch,
                 top: row,
                 width: column,
                 height: tall,
-                child: reveal(3, volumeControl ?? const SizedBox.expand()),
+                child: reveal(
+                  3,
+                  volumeControl ?? const SizedBox.expand(),
+                  cell: (1, 1),
+                ),
               ),
               if (mobileDataTile != null)
                 Positioned(
@@ -189,7 +202,7 @@ class QuickSettingsTiles extends StatelessWidget {
                   top: row,
                   width: wide,
                   height: capsule,
-                  child: reveal(4, mobileDataTile!),
+                  child: reveal(4, mobileDataTile!, cell: (1, 2)),
                 ),
               Positioned(
                 left: pitch * 2,
@@ -204,6 +217,7 @@ class QuickSettingsTiles extends StatelessWidget {
                     active: profile != PowerProfile.balanced,
                     onTap: onCycleProfile,
                   ),
+                  cell: (2, 2),
                 ),
               ),
               Positioned(
@@ -223,15 +237,20 @@ class QuickSettingsTiles extends StatelessWidget {
                     enabled: dndReady,
                     onTap: onToggleDnd,
                   ),
+                  cell: (2, 3),
                 ),
               ),
               for (final (index, tile) in footerTiles.indexed)
                 Positioned(
-                  left: footerLefts[index],
+                  left: pitch * footerColumns[index],
                   top: footerTop,
                   width: tile.wide ? wide : column,
                   height: tile.wide ? capsule : row,
-                  child: reveal(7 + index, tile),
+                  child: reveal(
+                    7 + index,
+                    tile,
+                    cell: (3, footerColumns[index]),
+                  ),
                 ),
             ],
           ),
@@ -271,22 +290,76 @@ class QuickTile extends StatefulWidget {
   State<QuickTile> createState() => _QuickTileState();
 }
 
-class _QuickTileState extends State<QuickTile> {
+class _QuickTileState extends State<QuickTile>
+    with SingleTickerProviderStateMixin {
   bool _focused = false;
+  late final _TilePour _pour = _TilePour(this, widget.active);
+
+  /// Where the last tap landed across the tile, 0 to 1; the liquid pours
+  /// in or drains out there. A state that changes much later, or from
+  /// elsewhere, pours from the middle.
+  double _tapAt = 0.5;
+  DateTime _tappedAt = DateTime(0);
+
+  ValueListenable<double>? _reveal;
+  double _revealAmount = 1;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _pour.reduced = MediaQuery.disableAnimationsOf(context);
+    final reveal = LiquidRevealScope.maybeOf(context);
+    if (reveal != _reveal) {
+      _reveal?.removeListener(_revealChanged);
+      _reveal = reveal?..addListener(_revealChanged);
+      _revealAmount = reveal?.value ?? 1;
+    }
+  }
+
+  /// While the shade carries the tile, a lit tile's liquid rides below the
+  /// brim and sloshes with the motion; at rest it is simply full.
+  void _revealChanged() {
+    final amount = _reveal!.value;
+    _pour.stir(amount, amount - _revealAmount, fromEmpty: _revealAmount <= 0);
+    _revealAmount = amount;
+  }
+
+  @override
+  void didUpdateWidget(covariant QuickTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active == widget.active) return;
+    final recent =
+        DateTime.now().difference(_tappedAt) < const Duration(seconds: 3);
+    _pour.turn(widget.active, at: recent ? _tapAt : 0.5);
+    _tappedAt = DateTime(0);
+  }
+
+  @override
+  void dispose() {
+    _reveal?.removeListener(_revealChanged);
+    _pour.dispose();
+    super.dispose();
+  }
+
+  void _noteTap(TapUpDetails details) {
+    final width = context.size?.width ?? 0;
+    if (width <= 0) return;
+    _tapAt = (details.localPosition.dx / width).clamp(0.05, 0.95).toDouble();
+    _tappedAt = DateTime.now();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
     final accent = theme.accentPalette;
-    final background = widget.active
-        ? accent.primary
-        : theme.cardColor(context.shellColors.tileOff);
-    final foreground = widget.active
-        ? accent.onPrimary
-        : context.shellColors.panelText;
-    final secondary = widget.active
-        ? accent.onPrimary.withValues(alpha: 0.78)
-        : context.shellColors.textTertiary;
+    final off = _TileInk(
+      foreground: context.shellColors.panelText,
+      secondary: context.shellColors.textTertiary,
+    );
+    final on = _TileInk(
+      foreground: accent.onPrimary,
+      secondary: accent.onPrimary.withValues(alpha: 0.78),
+    );
     final radius = theme.scaledRadius(20);
 
     return Semantics(
@@ -319,26 +392,21 @@ class _QuickTileState extends State<QuickTile> {
         },
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
+          onTapUp: widget.enabled ? _noteTap : null,
           onTap: widget.enabled ? widget.onTap : null,
           child: widget.wide
-              ? _buildWide(background, foreground, secondary, radius)
-              : _buildSmall(background, foreground, radius),
+              ? _buildWide(off, on, radius)
+              : _buildSmall(off, on, radius),
         ),
       ),
     );
   }
 
-  Widget _buildWide(
-    Color background,
-    Color foreground,
-    Color secondary,
-    double radius,
-  ) {
+  Widget _buildWide(_TileInk off, _TileInk on, double radius) {
     final visualScale = ShadeReferenceGeometry.inverseScaleOf(context);
     return _animatedSurface(
-      background: background,
       radius: radius,
-      child: Padding(
+      content: (ink) => Padding(
         padding: const EdgeInsets.fromLTRB(10, 0, 6, 0),
         child: Row(
           children: [
@@ -350,12 +418,12 @@ class _QuickTileState extends State<QuickTile> {
                         dimension: 20 * visualScale,
                         child: CircularProgressIndicator(
                           strokeWidth: 2 * visualScale,
-                          color: foreground,
+                          color: ink.foreground,
                         ),
                       )
                     : Icon(
                         widget.icon,
-                        color: foreground,
+                        color: ink.foreground,
                         size: 24 * visualScale,
                       ),
               ),
@@ -371,7 +439,7 @@ class _QuickTileState extends State<QuickTile> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: foreground,
+                      color: ink.foreground,
                       fontSize: 14,
                       height: 1.08,
                       fontWeight: FontWeight.w600,
@@ -385,7 +453,7 @@ class _QuickTileState extends State<QuickTile> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: secondary,
+                        color: ink.secondary,
                         fontSize: 10.5,
                         height: 1,
                         decoration: TextDecoration.none,
@@ -398,16 +466,18 @@ class _QuickTileState extends State<QuickTile> {
             if (widget.onDetails != null)
               _TileDetailsButton(
                 label: context.l10n.quickSettingsOpenDetails(widget.title),
-                foreground: foreground,
+                foreground: ink.foreground,
                 onPressed: widget.onDetails!,
               ),
           ],
         ),
       ),
+      off: off,
+      on: on,
     );
   }
 
-  Widget _buildSmall(Color background, Color foreground, double radius) {
+  Widget _buildSmall(_TileInk off, _TileInk on, double radius) {
     final visualScale = ShadeReferenceGeometry.inverseScaleOf(context);
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -428,12 +498,7 @@ class _QuickTileState extends State<QuickTile> {
           child: SizedBox(
             width: width,
             height: QuickSettingsGridMetrics.row,
-            child: _buildSmallContent(
-              background,
-              foreground,
-              radius,
-              visualScale,
-            ),
+            child: _buildSmallContent(off, on, radius, visualScale),
           ),
         );
       },
@@ -441,8 +506,8 @@ class _QuickTileState extends State<QuickTile> {
   }
 
   Widget _buildSmallContent(
-    Color background,
-    Color foreground,
+    _TileInk off,
+    _TileInk on,
     double radius,
     double visualScale,
   ) {
@@ -452,20 +517,21 @@ class _QuickTileState extends State<QuickTile> {
           height: QuickSettingsGridMetrics.capsule,
           width: double.infinity,
           child: _animatedSurface(
-            background: background,
             radius: radius,
-            child: Center(
+            off: off,
+            on: on,
+            content: (ink) => Center(
               child: widget.busy
                   ? SizedBox.square(
                       dimension: 22 * visualScale,
                       child: CircularProgressIndicator(
                         strokeWidth: 2 * visualScale,
-                        color: foreground,
+                        color: ink.foreground,
                       ),
                     )
                   : Icon(
                       widget.icon,
-                      color: foreground,
+                      color: ink.foreground,
                       size: 30 * visualScale,
                     ),
             ),
@@ -489,46 +555,346 @@ class _QuickTileState extends State<QuickTile> {
     );
   }
 
+  /// The tile's surface: off glass, with the accent poured in as liquid
+  /// when it turns on and drained out when it turns off. The contents are
+  /// drawn in the off ink above the liquid and in the on ink beneath it.
   Widget _animatedSurface({
-    required Color background,
     required double radius,
-    required Widget child,
+    required _TileInk off,
+    required _TileInk on,
+    required Widget Function(_TileInk ink) content,
   }) {
     final theme = ShellTheme.of(context);
     final accent = theme.accentPalette;
-    final borderRadius = BorderRadius.circular(radius);
-    final surface = AnimatedContainer(
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : Motion.tile,
-      curve: Motion.standard,
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(radius),
-        border: _focused
-            ? Border.all(color: accent.primary, width: 1.5)
-            : theme.transparencyMode == ShellTransparencyMode.glass
-            ? null
-            : Border.all(
-                color: widget.active
-                    ? accent.primary
-                    : context.shellColors.hairlineSoft,
-              ),
-      ),
-      child: child,
+    final glass = theme.transparencyMode == ShellTransparencyMode.glass;
+    final colors = _TileSurfaceColors(
+      off: theme.cardColor(context.shellColors.tileOff),
+      on: accent.primary,
+      offBorder: _focused
+          ? accent.primary
+          : glass
+          ? null
+          : context.shellColors.hairlineSoft,
+      onBorder: _focused || !glass ? accent.primary : null,
+      borderWidth: _focused ? 1.5 : 1,
     );
-    return ShellBackdropBlur(
-      blur:
-          !widget.active &&
-          theme.transparencyMode == ShellTransparencyMode.glass &&
-          theme.effectivePanelOpacity < 1,
-      separateChild: true,
-      borderRadius: borderRadius,
-      // The decoration rounds the tile itself.
-      clipUnfiltered: false,
-      child: surface,
+    return AnimatedBuilder(
+      animation: _pour,
+      builder: (context, _) {
+        final level = _pour.level;
+        final dry = level < 1;
+        final wet = level > 0 || _pour.surface.abs() > 0.5;
+        Widget layer(_TileInk ink, bool liquid, bool shown) => Visibility(
+          visible: shown,
+          maintainState: true,
+          maintainAnimation: true,
+          maintainSize: true,
+          // Only the layer of the state the tile is turning to takes input;
+          // a hidden layer's spinner does not tick.
+          child: TickerMode(
+            enabled: shown,
+            child: IgnorePointer(
+              ignoring: liquid != widget.active,
+              child: ExcludeSemantics(
+                excluding: liquid != widget.active,
+                child: ClipPath(
+                  clipper: _PourClipper(_pour, liquid: liquid),
+                  clipBehavior: dry && wet ? Clip.antiAlias : Clip.none,
+                  child: content(ink),
+                ),
+              ),
+            ),
+          ),
+        );
+        return ShellBackdropBlur(
+          blur: dry && glass && theme.effectivePanelOpacity < 1,
+          separateChild: true,
+          borderRadius: BorderRadius.circular(radius),
+          // The painter rounds the tile itself.
+          clipUnfiltered: false,
+          child: CustomPaint(
+            painter: _TileSurfacePainter(_pour, colors, radius),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [layer(off, false, dry), layer(on, true, wet)],
+            ),
+          ),
+        );
+      },
     );
   }
+}
+
+@immutable
+class _TileInk {
+  const _TileInk({required this.foreground, required this.secondary});
+
+  final Color foreground;
+  final Color secondary;
+}
+
+@immutable
+class _TileSurfaceColors {
+  const _TileSurfaceColors({
+    required this.off,
+    required this.on,
+    required this.offBorder,
+    required this.onBorder,
+    required this.borderWidth,
+  });
+
+  final Color off;
+  final Color on;
+  final Color? offBorder;
+  final Color? onBorder;
+  final double borderWidth;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _TileSurfaceColors &&
+      other.off == off &&
+      other.on == on &&
+      other.offBorder == offBorder &&
+      other.onBorder == onBorder &&
+      other.borderWidth == borderWidth;
+
+  @override
+  int get hashCode => Object.hash(off, on, offBorder, onBorder, borderWidth);
+}
+
+/// The accent liquid in a tile: its level rises to full when the tile
+/// turns on and falls to empty when it turns off, its surface bulging
+/// where the tap landed and ringing as it settles.
+class _TilePour extends ChangeNotifier {
+  _TilePour(TickerProvider vsync, bool active)
+    : _level = LiquidSpring(active ? 1 : 0, stiffness: 200, dampingRatio: 0.8) {
+    _ticker = vsync.createTicker(_tick);
+  }
+
+  late final Ticker _ticker;
+  Duration _last = Duration.zero;
+  final LiquidSpring _level;
+
+  /// Rings longer than the recipe's surface, so the slosh lasts.
+  final LiquidSpring _surface = LiquidSpring(
+    0,
+    stiffness: 300,
+    dampingRatio: 0.11,
+  );
+
+  /// How far below the brim a lit tile's liquid rides while the shade
+  /// moves it, as a fraction of its height.
+  final LiquidSpring _slack = LiquidSpring(
+    0,
+    stiffness: 100,
+    dampingRatio: 0.42,
+  );
+
+  /// The fastest the surface is ever kicked, in pixels per second, and the
+  /// fastest the liquid rises back to the brim, in heights per second.
+  static const double _calmSwing = 90;
+  static const double _calmRise = 1.5;
+
+  bool _arriving = false;
+  double _time = 0;
+  double _height = 62;
+  double centre = 0.5;
+  bool reduced = false;
+
+  double get level =>
+      (_level.value - math.max(0.0, _slack.value)).clamp(0.0, 1.0).toDouble();
+  double get surface => _surface.value;
+  double get time => _time;
+
+  void turn(bool active, {required double at}) {
+    centre = at;
+    _level.target = active ? 1 : 0;
+    if (reduced) {
+      _level.settle();
+      _surface.set(0);
+      notifyListeners();
+      return;
+    }
+    if (!_ticker.isActive) {
+      _last = Duration.zero;
+      _ticker.start();
+    }
+  }
+
+  /// The shade moved the tile: [amount] is how far it is revealed and
+  /// [change] the step it just took.
+  void stir(double amount, double change, {required bool fromEmpty}) {
+    if (_level.target < 1) return;
+    if (amount <= 0 || amount >= 1) {
+      _arriving = false;
+      _slack.target = 0;
+    } else {
+      // Arriving, the liquid comes in half full and stays there until the
+      // tile is in, then rises to the brim.
+      if (fromEmpty) {
+        _arriving = true;
+        _slack.value = 0.5;
+      }
+      _slack.target = _arriving ? 0.5 : 0.22;
+      // Each step tugs the surface, but never past a gentle swing: a quick
+      // swipe that opens the shade in a few frames sloshes no harder than
+      // a slow one.
+      _surface.velocity = (_surface.velocity + change * 900)
+          .clamp(-_calmSwing, _calmSwing)
+          .toDouble();
+    }
+    if (reduced) {
+      _slack.settle();
+      _surface.set(0);
+      notifyListeners();
+      return;
+    }
+    if (!_ticker.isActive) {
+      _last = Duration.zero;
+      _ticker.start();
+    }
+  }
+
+  Path region(Size size, {required bool liquid}) {
+    _height = size.height;
+    final body = _surfacePath(size);
+    if (liquid) return body;
+    return Path.combine(
+      PathOperation.difference,
+      Path()..addRect(Offset.zero & size),
+      body,
+    );
+  }
+
+  /// The liquid below its surface. Waves are sized in pixels, so a wide
+  /// tile sloshes like a wide container: a taller swell where the tap
+  /// landed, a tilt, and waves running across it.
+  Path _surfacePath(Size size) {
+    final width = size.width;
+    final y = size.height * (1 - level);
+    // A full or empty tile has no surface to show.
+    final calm = math.min(1.0, math.min(level, 1 - level) * 6);
+    final scale = (width / 76).clamp(1.0, 2.0);
+    final bulge = surface * calm * scale;
+    final tilt = bulge.abs() * 0.4 * math.sin(_time * 22);
+    final wave = bulge.abs() * 0.3;
+    final spread = (width * 0.22).clamp(14.0, 26.0);
+    const steps = 20;
+    final path = Path();
+    for (var i = 0; i <= steps; i += 1) {
+      final t = i / steps;
+      final x = width * t;
+      final distance = (x - centre * width) / spread;
+      final top =
+          y -
+          bulge * math.exp(-distance * distance / 2) +
+          tilt * (1 - 2 * t) +
+          wave * math.sin(x / 9 - _time * 9);
+      if (i == 0) {
+        path.moveTo(x, top);
+      } else {
+        path.lineTo(x, top);
+      }
+    }
+    return path
+      ..lineTo(width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+  }
+
+  void _tick(Duration elapsed) {
+    final dt = _last == Duration.zero
+        ? 1 / 120
+        : ((elapsed - _last).inMicroseconds / 1e6).clamp(0.0, 1 / 30);
+    _last = elapsed;
+    _time += dt;
+    _level.step(dt);
+    _slack.step(dt);
+    _slack.velocity = _slack.velocity.clamp(-_calmRise, _calmRise).toDouble();
+    // A small tile sloshes less than a tall bar.
+    _surface.target = LiquidTuning.surfaceTarget(
+      (_level.velocity - _slack.velocity) * _height * 0.6,
+    );
+    _surface.step(dt);
+    notifyListeners();
+    if (_level.resting(0.0005) &&
+        _slack.resting(0.0005) &&
+        _surface.resting(0.05)) {
+      _level.settle();
+      _slack.settle();
+      _surface.settle();
+      _ticker.stop();
+      notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+}
+
+class _PourClipper extends CustomClipper<Path> {
+  _PourClipper(this.pour, {required this.liquid}) : super(reclip: pour);
+
+  final _TilePour pour;
+  final bool liquid;
+
+  @override
+  Path getClip(Size size) => pour.region(size, liquid: liquid);
+
+  @override
+  bool shouldReclip(_PourClipper oldClipper) =>
+      oldClipper.pour != pour || oldClipper.liquid != liquid;
+}
+
+class _TileSurfacePainter extends CustomPainter {
+  _TileSurfacePainter(this.pour, this.colors, this.radius)
+    : super(repaint: pour);
+
+  final _TilePour pour;
+  final _TileSurfaceColors colors;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final shape = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      Radius.circular(math.min(radius, size.shortestSide / 2)),
+    );
+    final level = pour.level;
+    if (level < 1) canvas.drawRRect(shape, Paint()..color = colors.off);
+    if (level > 0 || pour.surface.abs() > 0.5) {
+      canvas.save();
+      canvas.clipRRect(shape);
+      canvas.drawPath(
+        pour.region(size, liquid: true),
+        Paint()..color = colors.on,
+      );
+      canvas.restore();
+    }
+    final border = Color.lerp(
+      colors.offBorder ?? colors.off.withValues(alpha: 0),
+      colors.onBorder ?? colors.on.withValues(alpha: 0),
+      level,
+    )!;
+    if (border.a > 0) {
+      canvas.drawRRect(
+        shape.deflate(colors.borderWidth / 2),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = colors.borderWidth
+          ..color = border,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_TileSurfacePainter oldDelegate) =>
+      oldDelegate.pour != pour ||
+      oldDelegate.colors != colors ||
+      oldDelegate.radius != radius;
 }
 
 class _TileDetailsButton extends StatefulWidget {

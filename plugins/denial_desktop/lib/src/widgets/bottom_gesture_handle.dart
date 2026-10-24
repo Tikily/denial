@@ -11,7 +11,7 @@ import 'package:denial_flutter_sdk/rendering.dart' show CompositedTranslation;
 import 'package:denial_flutter_sdk/system_services.dart'
     show hapticsServiceProvider;
 
-import 'gesture_pill.dart';
+import 'liquid_pill.dart';
 
 /// The home pill at the bottom of the screen. An upward pull arms recents,
 /// with a tap of the haptic motor, and opens it on release; a fast flick
@@ -28,7 +28,8 @@ class BottomGestureHandle extends ConsumerStatefulWidget {
       _BottomGestureHandleState();
 }
 
-class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle> {
+class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
+    with SingleTickerProviderStateMixin {
   static const double _closeDistance = 72.0;
   static const double _switchDistance = 82.0;
   static const double _flickVelocity = 650.0;
@@ -48,6 +49,10 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle> {
   late final ValueListenable<Offset> _drag;
   final _lift = ValueNotifier(Offset.zero);
   final _armed = ValueNotifier(false);
+
+  /// How the pill looks: liquid that follows the finger. It never decides
+  /// anything about the gesture.
+  late final PillLiquid _liquid = PillLiquid(this);
   bool _overviewVisible = false;
   bool _hasSwitchTarget = false;
   double _recentsArmTravel = double.infinity;
@@ -71,7 +76,14 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _liquid.reduced = MediaQuery.disableAnimationsOf(context);
+  }
+
+  @override
   void dispose() {
+    _liquid.dispose();
     _drag.removeListener(_dragged);
     _lift.dispose();
     _armed.dispose();
@@ -104,6 +116,13 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle> {
     _armed.value = _overviewVisible
         ? drag.dy > _closeDistance
         : recents || _horizontalSwitchArmed(drag, hasTarget: _hasSwitchTarget);
+    final progress = _overviewVisible
+        ? drag.dy / _closeDistance
+        : [
+            up / _recentsArmTravel,
+            if (_hasSwitchTarget) drag.dx.abs() / _switchDistance,
+          ].reduce((a, b) => a > b ? a : b);
+    _liquid.arm(progress, armed: _armed.value);
   }
 
   @override
@@ -130,29 +149,42 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle> {
       bottom: ReferenceShellMetrics.gestureBottomInset,
       child: Center(
         child: RepaintBoundary(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onPanStart: (_) {
-              _beginPanTracking();
-              controller.resetGestureDrag();
-            },
-            onPanUpdate: (details) {
-              _trackPan(details.delta);
-              controller.updateGestureDrag(details.delta);
-            },
-            onPanCancel: controller.resetGestureDrag,
-            onPanEnd: (details) => _handlePanEnd(controller, details),
-            child: SizedBox(
-              width: ReferenceShellMetrics.gestureHitWidth,
-              height: ReferenceShellMetrics.gestureHitHeight,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 20),
-                child: Center(
-                  child: CompositedTranslation(
-                    translation: _lift,
-                    child: ValueListenableBuilder<bool>(
-                      valueListenable: _armed,
-                      builder: (context, armed, _) => GesturePill(armed: armed),
+          child: Listener(
+            onPointerDown: (event) => _liquid.touch(
+              event.localPosition.dx -
+                  ReferenceShellMetrics.gestureHitWidth / 2,
+            ),
+            // A tap, or a swipe the pan has not settled yet.
+            onPointerUp: (_) => _liquid.release(PillRelease.settle),
+            onPointerCancel: (_) => _liquid.release(PillRelease.settle),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanStart: (_) {
+                _beginPanTracking();
+                controller.resetGestureDrag();
+              },
+              onPanUpdate: (details) {
+                _trackPan(details.delta);
+                controller.updateGestureDrag(details.delta);
+                _liquid.drag(
+                  _panTravel,
+                  _panVelocity.getVelocity().pixelsPerSecond.dx,
+                );
+              },
+              onPanCancel: () {
+                controller.resetGestureDrag();
+                _liquid.release(PillRelease.settle);
+              },
+              onPanEnd: (details) => _handlePanEnd(controller, details),
+              child: SizedBox(
+                width: ReferenceShellMetrics.gestureHitWidth,
+                height: ReferenceShellMetrics.gestureHitHeight,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 20),
+                  child: Center(
+                    child: CompositedTranslation(
+                      translation: _lift,
+                      child: LiquidPill(liquid: _liquid),
                     ),
                   ),
                 ),
@@ -176,10 +208,16 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle> {
       _panVelocity.getVelocity().pixelsPerSecond,
       details.velocity.pixelsPerSecond,
     );
-    _resolvePan(controller, drag, velocity);
+    final acted = _resolvePan(controller, drag, velocity);
+    _liquid.release(
+      acted ? PillRelease.launch : PillRelease.settle,
+      velocity: velocity,
+    );
   }
 
-  void _resolvePan(
+  /// Whether the swipe did something: closed recents, moved the row, went
+  /// home or opened recents.
+  bool _resolvePan(
     ReferenceShellController controller,
     Offset drag,
     Offset velocity,
@@ -189,15 +227,16 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle> {
     if (currentState.overviewVisible) {
       if (drag.dy > _closeDistance || velocity.dy > _flickVelocity) {
         controller.closeOverview();
-      } else {
-        controller.resetGestureDrag(releaseVelocity: velocity.dy);
+        return true;
       }
-      return;
+      controller.resetGestureDrag(releaseVelocity: velocity.dy);
+      return false;
     }
 
     if (controller.holdsRow || _horizontalFlick(currentState, drag, velocity)) {
       controller.releaseRow(velocity.dx);
-      return;
+      return drag.dx.abs() > _switchDistance ||
+          velocity.dx.abs() > _switchFlickVelocity;
     }
 
     // A fast up-flick sends an app home or opens recents when already home.
@@ -207,10 +246,10 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle> {
     if (currentState.launchTransitionActive) {
       if (velocity.dy < -_homeFlickVelocity || armed) {
         controller.goHome(releaseVelocity: velocity.dy);
-      } else {
-        controller.resetGestureDrag(releaseVelocity: velocity.dy);
+        return true;
       }
-      return;
+      controller.resetGestureDrag(releaseVelocity: velocity.dy);
+      return false;
     }
     if (velocity.dy < -_homeFlickVelocity) {
       if (hasForeground) {
@@ -218,11 +257,13 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle> {
       } else {
         controller.openOverview(releaseVelocity: velocity.dy);
       }
+      return true;
     } else if (armed) {
       controller.openOverview(releaseVelocity: velocity.dy);
-    } else {
-      controller.resetGestureDrag(releaseVelocity: velocity.dy);
+      return true;
     }
+    controller.resetGestureDrag(releaseVelocity: velocity.dy);
+    return false;
   }
 
   void _beginPanTracking() {

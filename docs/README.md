@@ -23,6 +23,7 @@ Project-level release documents live at the repository root:
 - [Keyboard window resizing](keyboard-shortcuts.md)
 - [Touch display keyboard and touchpad](INPUT_DECK.md)
 - [Live Flutter UI development](UI_DEVELOPMENT.md)
+- [Liquid motion: the mobile control animation recipe](LIQUID_MOTION.md)
 - [Custom Flutter shells](CUSTOM_SHELLS.md)
 - [Plugin system: accepted agent implementation contract](PLUGIN_SYSTEM.md)
 - [Plugin Manager: Git distribution and backend contract](PLUGIN_MANAGER.md)
