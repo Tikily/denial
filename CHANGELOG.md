@@ -46,6 +46,19 @@ boundaries may change before 1.0.
 - Alpine Linux 3.24 is now a supported x86-64 package target, with native APK
   packages, OpenRC session integration, installation documentation, and a
   no-compile release-promotion path.
+- Remote desktops, virtual machines and other apps that ask for it through
+  `zwp_keyboard_shortcuts_inhibit_v1` can now receive Super and Denial's other
+  shortcuts while they have focus. Denial asks first: Allow once, Always allow,
+  Decline once or Never allow. The pointer release shortcut (Super+Escape by default), VT
+  switching, the emergency exit and the volume and brightness keys stay with
+  Denial, and the release shortcut gives the shortcuts back until the app is
+  focused again.
+- Settings has a Permissions page. It lists the apps that asked for Denial's
+  keyboard shortcuts and sets each to Ask, Always allow or Never allow,
+  effective at once.
+- `denial-portal` now implements `org.freedesktop.impl.portal.Access`, so
+  portal permission questions, such as camera access for sandboxed apps,
+  appear in Denial's own dialog.
 
 ### Changed
 

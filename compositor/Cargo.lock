@@ -494,8 +494,11 @@ dependencies = [
 name = "denial-portal"
 version = "0.0.0"
 dependencies = [
+ "async-channel",
  "denial",
  "libc",
+ "serde_json",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
  "zbus",

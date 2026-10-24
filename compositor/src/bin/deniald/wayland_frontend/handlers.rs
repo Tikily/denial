@@ -1836,6 +1836,10 @@ impl SeatHandler for RuntimeState {
         if input_method_changed {
             self.scene_sync.mark_dirty();
         }
+        self.wayland
+            .as_mut()
+            .expect("missing Wayland frontend")
+            .shortcuts_inhibit_focus_changed(focused_surface.clone());
         crate::cpu_scheduling::focus_changed(
             client
                 .as_ref()

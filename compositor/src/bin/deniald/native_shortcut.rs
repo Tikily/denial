@@ -1819,6 +1819,19 @@ impl ShortcutDisposition {
             )
     }
 
+    /// Shortcuts that stay Denial's while an app holds all the others: the
+    /// way out of that app, the emergency exit and the hardware controls.
+    /// VT switching is handled before any of them.
+    pub(super) fn survives_shortcuts_inhibit(&self) -> bool {
+        matches!(
+            self,
+            Self::RequestVtSwitch(_)
+                | Self::RequestShutdown
+                | Self::RequestReleasePointer
+                | Self::RequestMute
+        ) || self.repeats_system_control()
+    }
+
     pub(super) fn repeats_system_control(&self) -> bool {
         matches!(
             self,
@@ -2388,6 +2401,32 @@ mod tests {
         assert_eq!(
             engine.observe_gesture(ShortcutGesture::FourFingerSwipeUp),
             ShortcutDisposition::PluginAction(id.into())
+        );
+    }
+
+    #[test]
+    fn an_app_holding_the_shortcuts_gets_super_but_not_the_way_out() {
+        const KEY_A: u32 = 30;
+        let mut engine = ShortcutEngine::from_file(&default_shortcut_file()).unwrap();
+        let super_press = engine.observe(KEY_LEFT_META, true);
+        assert!(!super_press.survives_shortcuts_inhibit());
+        let overview = engine.observe(KEY_A, true);
+        assert_eq!(overview, ShortcutDisposition::RequestOverview);
+        assert!(!overview.survives_shortcuts_inhibit());
+        engine.pass_through_key(KEY_A);
+        let release_pointer = engine.observe(KEY_ESCAPE, true);
+        assert_eq!(release_pointer, ShortcutDisposition::RequestReleasePointer);
+        assert!(release_pointer.survives_shortcuts_inhibit());
+        engine.observe(KEY_ESCAPE, false);
+        engine.observe(KEY_LEFT_META, false);
+        assert!(
+            engine
+                .observe(KEY_VOLUME_UP, true)
+                .survives_shortcuts_inhibit()
+        );
+        assert!(
+            ShortcutDisposition::RequestShutdown.survives_shortcuts_inhibit()
+                && !ShortcutDisposition::RequestLock.survives_shortcuts_inhibit()
         );
     }
 

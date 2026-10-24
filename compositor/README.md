@@ -274,9 +274,9 @@ Denial also owns the desktop application colour-scheme and accent preferences.
 Committed settings select the Flutter shell's semantic dark/light theme;
 Flutter resolves custom or wallpaper-derived accent color, and deniald copies
 the complete state as a bounded snapshot to the separate `denial-portal`
-process. That helper implements `org.freedesktop.impl.portal.Settings`; it
-neither parses the settings document nor runs D-Bus work on the compositor
-event loop.
+process. That helper implements `org.freedesktop.impl.portal.Settings` and
+`org.freedesktop.impl.portal.Access`; it neither parses the settings document
+nor runs D-Bus work on the compositor event loop.
 
 Measured on the current DP-4/DP-5 setup, the steady dual-output loop runs at
 about 180 Hz (the slower output), with roughly 0.32 ms average render time while

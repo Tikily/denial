@@ -271,16 +271,43 @@ projection; it does not affect two-finger content scrolling or shortcut swipes.
 The shell receives touchpad presence separately so controls are disabled when
 no suitable hardware is connected.
 
-## Desktop Settings portal
+## Desktop portal
 
 `denial-portal` owns
-`org.freedesktop.impl.portal.desktop.denial` and implements only
-`org.freedesktop.impl.portal.Settings` at
+`org.freedesktop.impl.portal.desktop.denial` and implements
+`org.freedesktop.impl.portal.Settings` and
+`org.freedesktop.impl.portal.Access` at
 `/org/freedesktop/portal/desktop`. Its authoritative appearance keys are
 `org.freedesktop.appearance/color-scheme` and `accent-color`; unknown keys
 return the standard portal `NotFound` error. Portal routing selects
 `denial;gtk` for Settings, so GTK remains the fallback for namespaces Denial
 does not own.
+
+Access asks the user whether an app may have something and returns the
+answer; callers keep it. Each request starts the Polkit dialog bundle in its
+access mode as a centered overlay, over a private socket described in
+`compositor/denial-portal/src/access.rs`. A boolean choice named `remember`
+becomes once-or-always buttons for both answers: "Always allow", "Allow once",
+"Never allow" and "Decline once". Its value is reported with a denial too,
+where `true` means "never". The request handle exports
+`org.freedesktop.impl.portal.Request`, whose `Close` withdraws the dialog.
+
+### Keyboard shortcuts inhibition
+
+deniald serves `zwp_keyboard_shortcuts_inhibit_manager_v1`. An inhibitor is
+active only while its surface has keyboard focus and its app is allowed. The
+first time an app asks, deniald calls Access off the compositor thread. The
+portal permission store keeps each app's answer in table `denial`, entry
+`shortcuts-inhibit`, by app ID: `yes` for "Always allow", `no` for "Never
+allow", and `ask` for an app that was asked. "Allow once" and "Decline once"
+last while the app stays connected. Settings > Permissions lists the asked apps
+and changes their stored answers; deniald follows the store's `Changed` signal
+and asks again an app whose stored answer changed. While an inhibitor is
+active, keys go to the app even when they would trigger a Denial shortcut,
+except the pointer release shortcut, VT switching, the emergency exit and the
+volume and brightness keys. The shortcut engine still observes every key, and
+each release goes where its press went. The pointer release shortcut also
+deactivates the inhibitor until the app is focused again.
 
 The compositor publishes complete, revisioned `DesktopThemeSnapshot` records
 over a mode-`0600`, same-user `SOCK_SEQPACKET` endpoint at

@@ -2401,6 +2401,23 @@ fn intercept_native_escape(
             _ => true,
         };
     }
+    // The shortcut engine has observed the key either way, so its modifier
+    // and chord state stays balanced while an app holds the shortcuts.
+    if let Some(frontend) = state.wayland.as_mut() {
+        let inhibit = &mut frontend.shortcuts_inhibit;
+        if key_state == KeyState::Released {
+            if inhibit.take_forwarded_release(xkb_keycode) {
+                return false;
+            }
+        } else {
+            let forwarded = inhibit.active() && !disposition.survives_shortcuts_inhibit();
+            inhibit.note_press(xkb_keycode, forwarded);
+            if forwarded {
+                state.native_escape_shortcut.pass_through_key(evdev_keycode);
+                return false;
+            }
+        }
+    }
     #[cfg(feature = "flutter")]
     let repeats_system_control = key_state == KeyState::Pressed && disposition.repeats_with_timer();
     let handled = execute_shortcut_disposition(state, disposition);
@@ -2686,6 +2703,9 @@ fn execute_shortcut_disposition_at(
             true
         }
         ShortcutDisposition::RequestReleasePointer => {
+            if let Some(frontend) = state.wayland.as_mut() {
+                frontend.suspend_shortcuts_inhibit();
+            }
             #[cfg(feature = "flutter")]
             release_pointer_to_shell(state);
             true
