@@ -11,7 +11,12 @@ class ReferenceShellMetrics {
   static const double gesturePillLiftTravel = 280.0;
   static const double edgePanelGestureWidth = 220.0;
   static const double edgePanelGestureHeight = 18.0;
-  static const double edgePanelMaxHeight = 368.0;
+
+  /// The keyboard's suggestion strip, on top of the keys.
+  static const double oskSuggestionStripHeight = 64.0;
+  static const double edgePanelKeysMaxHeight = 338.0;
+  static const double edgePanelMaxHeight =
+      edgePanelKeysMaxHeight + oskSuggestionStripHeight;
   static const double edgePanelOpenDistance = 86.0;
   static const double edgePanelDragDistance = edgePanelMaxHeight;
   static const double edgePanelScrollStripWidth = 18.0;
@@ -57,10 +62,11 @@ class ReferenceShellMetrics {
     if (viewSize.height <= 0.0) {
       return 0.0;
     }
-    final maxHeight = viewSize.height < edgePanelMaxHeight
-        ? viewSize.height
-        : edgePanelMaxHeight;
-    return (viewSize.height * 0.30).clamp(0.0, maxHeight).toDouble();
+    // The keys take 30% of the view; the suggestion strip adds to that.
+    final keys = (viewSize.height * 0.30).clamp(0.0, edgePanelKeysMaxHeight);
+    return (keys + oskSuggestionStripHeight)
+        .clamp(0.0, viewSize.height)
+        .toDouble();
   }
 
   static Rect edgePanelRect(Size viewSize, double progress) {

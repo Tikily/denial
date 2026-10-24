@@ -2,6 +2,7 @@ import 'package:denial_desktop/src/state/reference_shell_controller.dart';
 import 'package:denial_desktop/src/state/reference_shell_metrics.dart';
 import 'package:denial_desktop/src/state/reference_shell_state.dart';
 
+import 'package:flutter/gestures.dart' show DeviceGestureSettings;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -334,28 +335,39 @@ class _EdgePanelScrollStrip extends ConsumerWidget {
 class _EdgePanelSheet extends ConsumerWidget {
   const _EdgePanelSheet();
 
+  /// How far a finger travels before it drags the sheet instead of typing:
+  /// about half a key, twice the default slop, so a key touch that wanders
+  /// still types.
+  static const _dragSlop = 36.0;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(referenceShellProvider.notifier);
     final size = MediaQuery.sizeOf(context);
     final panelHeight = ReferenceShellMetrics.edgePanelHeight(size);
+    final media = MediaQuery.of(context);
 
     return Align(
       alignment: Alignment.bottomCenter,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onVerticalDragStart: (_) => controller.startEdgePanelDrag(),
-        onVerticalDragUpdate: (details) {
-          controller.updateEdgePanelDrag(Offset(0.0, details.delta.dy));
-        },
-        onVerticalDragEnd: (details) {
-          controller.endEdgePanelDrag(details.primaryVelocity ?? 0.0);
-        },
-        onVerticalDragCancel: () => controller.endEdgePanelDrag(0.0),
-        child: SizedBox(
-          width: double.infinity,
-          height: panelHeight,
-          child: const _EdgePanelContent(),
+      child: MediaQuery(
+        data: media.copyWith(
+          gestureSettings: const DeviceGestureSettings(touchSlop: _dragSlop),
+        ),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onVerticalDragStart: (_) => controller.startEdgePanelDrag(),
+          onVerticalDragUpdate: (details) {
+            controller.updateEdgePanelDrag(Offset(0.0, details.delta.dy));
+          },
+          onVerticalDragEnd: (details) {
+            controller.endEdgePanelDrag(details.primaryVelocity ?? 0.0);
+          },
+          onVerticalDragCancel: () => controller.endEdgePanelDrag(0.0),
+          child: SizedBox(
+            width: double.infinity,
+            height: panelHeight,
+            child: const _EdgePanelContent(),
+          ),
         ),
       ),
     );
@@ -375,31 +387,48 @@ class _EdgePanelContent extends ConsumerWidget {
       ),
     );
     final theme = ShellTheme.of(context);
-    return ShellBackdropBlur(
-      separateChild: true,
-      blur: theme.effectivePanelOpacity < 1.0,
-      borderRadius: BorderRadius.vertical(
-        top: Radius.circular(theme.panelRadius),
-      ),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: theme.panelColor(context.shellColors.panelBackground),
-          border: Border(
-            top: BorderSide(color: context.shellColors.hairline, width: 1),
+    // The keys sit beside the clipped glass, not in it: key popups rise
+    // above the panel's top edge.
+    return Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
+      children: [
+        ShellBackdropBlur(
+          separateChild: true,
+          blur: theme.effectivePanelOpacity < 1.0,
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(theme.panelRadius),
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.panelColor(context.shellColors.panelBackground),
+              border: Border(
+                top: BorderSide(color: context.shellColors.hairline, width: 1),
+              ),
+            ),
           ),
         ),
-        child: RepaintBoundary(
+        RepaintBoundary(
           // Keep OSK presses inside the focused EditableText tap group. A
           // keyboard key must not look like an outside tap and retire the
           // editor before its command is delivered.
           child: TextFieldTapRegion(
             child: ShellOskPanel(
-              onKeyTap: vibrate ? haptics.pulse : null,
+              onKeyDown: vibrate ? haptics.pulse : null,
               onKey: (intent) => _sendOskIntent(bridge, intent),
+              textInputStates: bridge.textInputStates,
+              predictions: bridge.textPredictions,
+              onPredict: (word) => bridge.requestTextPrediction(
+                serial: word.serial,
+                word: word.word,
+                touchX: word.touchX,
+                touchY: word.touchY,
+                manualCapital: word.manualCapital,
+              ),
             ),
           ),
         ),
-      ),
+      ],
     );
   }
 
@@ -416,17 +445,11 @@ class _EdgePanelContent extends ConsumerWidget {
           bridge.sendKeyboardText(' ');
         }
       case ShellOskKeyAction.backspace:
-        final key = intent.key ?? 'BackSpace';
-        switch (intent.phase) {
-          case ShellOskKeyPhase.tap:
-            bridge.sendKeyboardKey(key, ctrl: intent.ctrl);
-          case ShellOskKeyPhase.pressed:
-            bridge.pressKeyboardKey(key);
-          case ShellOskKeyPhase.released:
-            bridge.releaseKeyboardKey(key);
-        }
+        bridge.sendKeyboardKey(intent.key ?? 'BackSpace', ctrl: intent.ctrl);
       case ShellOskKeyAction.enter:
         bridge.sendKeyboardKey(intent.key ?? 'Return', ctrl: intent.ctrl);
+      case ShellOskKeyAction.replace:
+        bridge.sendKeyboardReplace(intent.replaced ?? '', intent.text ?? '');
     }
   }
 }

@@ -1980,6 +1980,12 @@ abstract class AppLocalizations {
   /// **'Backspace'**
   String get oskBackspace;
 
+  /// English UI text for oskCapsLock.
+  ///
+  /// In en, this message translates to:
+  /// **'Caps lock'**
+  String get oskCapsLock;
+
   /// English UI text for oskControlKey.
   ///
   /// In en, this message translates to:

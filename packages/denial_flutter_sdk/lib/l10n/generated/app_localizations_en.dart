@@ -1107,6 +1107,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get oskBackspace => 'Backspace';
 
   @override
+  String get oskCapsLock => 'Caps lock';
+
+  @override
   String get oskControlKey => 'CTRL';
 
   @override

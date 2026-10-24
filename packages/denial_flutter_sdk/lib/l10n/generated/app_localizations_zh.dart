@@ -1068,6 +1068,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get oskBackspace => '退格';
 
   @override
+  String get oskCapsLock => '大写锁定';
+
+  @override
   String get oskControlKey => 'CTRL';
 
   @override

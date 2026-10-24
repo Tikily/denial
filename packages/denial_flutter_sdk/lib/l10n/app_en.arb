@@ -1575,6 +1575,10 @@
   "@oskBackspace": {
     "description": "English UI text for oskBackspace."
   },
+  "oskCapsLock": "Caps lock",
+  "@oskCapsLock": {
+    "description": "English UI text for oskCapsLock."
+  },
   "oskControlKey": "CTRL",
   "@oskControlKey": {
     "description": "English UI text for oskControlKey."
