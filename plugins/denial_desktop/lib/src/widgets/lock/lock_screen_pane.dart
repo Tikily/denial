@@ -366,7 +366,10 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
                         parts: const {HomeClockPart.date, HomeClockPart.status},
                       ),
                     if (!widget.desktop && widget.authenticationEnabled) ...[
-                      _LockNotifications(scale: lockSettings.clockScale),
+                      _LockNotifications(
+                        scale: lockSettings.clockScale,
+                        onOpen: _openAfterUnlock,
+                      ),
                       const _LockGlyph(),
                     ],
                     if (widget.desktop &&
@@ -516,6 +519,14 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
     }
   }
 
+  /// A tapped notification opens once the session unlocks; the face leaves
+  /// for the PIN as on a swipe.
+  void _openAfterUnlock(String groupKey) {
+    if (widget.unlockProgress.value > 0.0 || _authenticationVisible) return;
+    ref.read(lockNotificationOpenProvider.notifier).request(groupKey);
+    _showAuthentication();
+  }
+
   void _submitResponse() {
     final prompt = ref.read(authenticationProvider).prompt;
     if (prompt == null || !prompt.requiresResponse) {
@@ -528,6 +539,7 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
   }
 
   void _cancelAuthentication() {
+    ref.read(lockNotificationOpenProvider.notifier).clear();
     _responseController.clear();
     _responseFocus.unfocus();
     _beginWhenIdle = false;

@@ -267,6 +267,11 @@ impl RuntimeState {
         if let Some(window_focus) = window_focus {
             self.pending_window_events.push(window_focus);
         }
+        if let Some(server) = &self.notification_server
+            && !server.replay()
+        {
+            warn!("could not queue the notification replay for the new shell");
+        }
         for (monitor_id, workspace_id) in workspace_states {
             self.queue_workspace_action(monitor_id, workspace_id);
         }

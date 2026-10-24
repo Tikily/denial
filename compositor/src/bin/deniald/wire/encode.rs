@@ -1574,6 +1574,23 @@ fn encode_notification<'a>(
     let image_path = builder.create_string(&notification.image_path);
     let sound_name = builder.create_string(&notification.sound_name);
     let sound_file = builder.create_string(&notification.sound_file);
+    let group_key = builder.create_string(&notification.group_key);
+    let message_offsets = notification
+        .messages
+        .iter()
+        .map(|message| {
+            let sender = builder.create_string(&message.sender);
+            let text = builder.create_string(&message.text);
+            fb::DesktopNotificationMessage::create(
+                builder,
+                &fb::DesktopNotificationMessageArgs {
+                    sender: Some(sender),
+                    text: Some(text),
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let messages = builder.create_vector(&message_offsets);
     let urgency = match notification.urgency {
         NotificationUrgency::Low => fb::DesktopNotificationUrgency::Low,
         NotificationUrgency::Normal => fb::DesktopNotificationUrgency::Normal,
@@ -1606,6 +1623,12 @@ fn encode_notification<'a>(
             progress: notification.progress,
             has_progress: notification.has_progress,
             expire_timeout_ms: notification.expire_timeout_ms,
+            alert: notification.alert,
+            group_key: Some(group_key),
+            group_summary: notification.group_summary,
+            time_ms: notification.time_ms,
+            messages: Some(messages),
+            clearable: notification.clearable,
         },
     )
 }

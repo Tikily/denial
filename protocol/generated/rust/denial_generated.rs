@@ -10277,6 +10277,120 @@ impl core::fmt::Debug for DesktopNotificationImageData<'_> {
       ds.finish()
   }
 }
+pub enum DesktopNotificationMessageOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct DesktopNotificationMessage<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for DesktopNotificationMessage<'a> {
+  type Inner = DesktopNotificationMessage<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: unsafe { flatbuffers::Table::new(buf, loc) } }
+  }
+}
+
+impl<'a> DesktopNotificationMessage<'a> {
+  pub const VT_SENDER: flatbuffers::VOffsetT = 4;
+  pub const VT_TEXT: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    DesktopNotificationMessage { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args DesktopNotificationMessageArgs<'args>
+  ) -> flatbuffers::WIPOffset<DesktopNotificationMessage<'bldr>> {
+    let mut builder = DesktopNotificationMessageBuilder::new(_fbb);
+    if let Some(x) = args.text { builder.add_text(x); }
+    if let Some(x) = args.sender { builder.add_sender(x); }
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn sender(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(DesktopNotificationMessage::VT_SENDER, None)}
+  }
+  #[inline]
+  pub fn text(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(DesktopNotificationMessage::VT_TEXT, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for DesktopNotificationMessage<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("sender", Self::VT_SENDER, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("text", Self::VT_TEXT, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct DesktopNotificationMessageArgs<'a> {
+    pub sender: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub text: Option<flatbuffers::WIPOffset<&'a str>>,
+}
+impl<'a> Default for DesktopNotificationMessageArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    DesktopNotificationMessageArgs {
+      sender: None,
+      text: None,
+    }
+  }
+}
+
+pub struct DesktopNotificationMessageBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> DesktopNotificationMessageBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_sender(&mut self, sender: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(DesktopNotificationMessage::VT_SENDER, sender);
+  }
+  #[inline]
+  pub fn add_text(&mut self, text: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(DesktopNotificationMessage::VT_TEXT, text);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> DesktopNotificationMessageBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    DesktopNotificationMessageBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<DesktopNotificationMessage<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for DesktopNotificationMessage<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("DesktopNotificationMessage");
+      ds.field("sender", &self.sender());
+      ds.field("text", &self.text());
+      ds.finish()
+  }
+}
 pub enum DesktopNotificationOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -10317,6 +10431,12 @@ impl<'a> DesktopNotification<'a> {
   pub const VT_PROGRESS: flatbuffers::VOffsetT = 46;
   pub const VT_HAS_PROGRESS: flatbuffers::VOffsetT = 48;
   pub const VT_EXPIRE_TIMEOUT_MS: flatbuffers::VOffsetT = 50;
+  pub const VT_ALERT: flatbuffers::VOffsetT = 52;
+  pub const VT_GROUP_KEY: flatbuffers::VOffsetT = 54;
+  pub const VT_GROUP_SUMMARY: flatbuffers::VOffsetT = 56;
+  pub const VT_TIME_MS: flatbuffers::VOffsetT = 58;
+  pub const VT_MESSAGES: flatbuffers::VOffsetT = 60;
+  pub const VT_CLEARABLE: flatbuffers::VOffsetT = 62;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -10328,6 +10448,9 @@ impl<'a> DesktopNotification<'a> {
     args: &'args DesktopNotificationArgs<'args>
   ) -> flatbuffers::WIPOffset<DesktopNotification<'bldr>> {
     let mut builder = DesktopNotificationBuilder::new(_fbb);
+    builder.add_time_ms(args.time_ms);
+    if let Some(x) = args.messages { builder.add_messages(x); }
+    if let Some(x) = args.group_key { builder.add_group_key(x); }
     builder.add_expire_timeout_ms(args.expire_timeout_ms);
     builder.add_progress(args.progress);
     builder.add_y(args.y);
@@ -10345,6 +10468,9 @@ impl<'a> DesktopNotification<'a> {
     if let Some(x) = args.app_name { builder.add_app_name(x); }
     if let Some(x) = args.sender { builder.add_sender(x); }
     builder.add_id(args.id);
+    builder.add_clearable(args.clearable);
+    builder.add_group_summary(args.group_summary);
+    builder.add_alert(args.alert);
     builder.add_has_progress(args.has_progress);
     builder.add_has_position(args.has_position);
     builder.add_action_icons(args.action_icons);
@@ -10524,6 +10650,48 @@ impl<'a> DesktopNotification<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<i32>(DesktopNotification::VT_EXPIRE_TIMEOUT_MS, Some(-1)).unwrap()}
   }
+  #[inline]
+  pub fn alert(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(DesktopNotification::VT_ALERT, Some(true)).unwrap()}
+  }
+  #[inline]
+  pub fn group_key(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(DesktopNotification::VT_GROUP_KEY, None)}
+  }
+  #[inline]
+  pub fn group_summary(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(DesktopNotification::VT_GROUP_SUMMARY, Some(false)).unwrap()}
+  }
+  #[inline]
+  pub fn time_ms(&self) -> i64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<i64>(DesktopNotification::VT_TIME_MS, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn messages(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<DesktopNotificationMessage<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<DesktopNotificationMessage>>>>(DesktopNotification::VT_MESSAGES, None)}
+  }
+  #[inline]
+  pub fn clearable(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(DesktopNotification::VT_CLEARABLE, Some(true)).unwrap()}
+  }
 }
 
 impl flatbuffers::Verifiable for DesktopNotification<'_> {
@@ -10557,6 +10725,12 @@ impl flatbuffers::Verifiable for DesktopNotification<'_> {
      .visit_field::<i32>("progress", Self::VT_PROGRESS, false)?
      .visit_field::<bool>("has_progress", Self::VT_HAS_PROGRESS, false)?
      .visit_field::<i32>("expire_timeout_ms", Self::VT_EXPIRE_TIMEOUT_MS, false)?
+     .visit_field::<bool>("alert", Self::VT_ALERT, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("group_key", Self::VT_GROUP_KEY, false)?
+     .visit_field::<bool>("group_summary", Self::VT_GROUP_SUMMARY, false)?
+     .visit_field::<i64>("time_ms", Self::VT_TIME_MS, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<DesktopNotificationMessage>>>>("messages", Self::VT_MESSAGES, false)?
+     .visit_field::<bool>("clearable", Self::VT_CLEARABLE, false)?
      .finish();
     Ok(())
   }
@@ -10586,6 +10760,12 @@ pub struct DesktopNotificationArgs<'a> {
     pub progress: i32,
     pub has_progress: bool,
     pub expire_timeout_ms: i32,
+    pub alert: bool,
+    pub group_key: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub group_summary: bool,
+    pub time_ms: i64,
+    pub messages: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<DesktopNotificationMessage<'a>>>>>,
+    pub clearable: bool,
 }
 impl<'a> Default for DesktopNotificationArgs<'a> {
   #[inline]
@@ -10615,6 +10795,12 @@ impl<'a> Default for DesktopNotificationArgs<'a> {
       progress: 0,
       has_progress: false,
       expire_timeout_ms: -1,
+      alert: true,
+      group_key: None,
+      group_summary: false,
+      time_ms: 0,
+      messages: None,
+      clearable: true,
     }
   }
 }
@@ -10721,6 +10907,30 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> DesktopNotificationBuilder<'a, 
     self.fbb_.push_slot::<i32>(DesktopNotification::VT_EXPIRE_TIMEOUT_MS, expire_timeout_ms, -1);
   }
   #[inline]
+  pub fn add_alert(&mut self, alert: bool) {
+    self.fbb_.push_slot::<bool>(DesktopNotification::VT_ALERT, alert, true);
+  }
+  #[inline]
+  pub fn add_group_key(&mut self, group_key: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(DesktopNotification::VT_GROUP_KEY, group_key);
+  }
+  #[inline]
+  pub fn add_group_summary(&mut self, group_summary: bool) {
+    self.fbb_.push_slot::<bool>(DesktopNotification::VT_GROUP_SUMMARY, group_summary, false);
+  }
+  #[inline]
+  pub fn add_time_ms(&mut self, time_ms: i64) {
+    self.fbb_.push_slot::<i64>(DesktopNotification::VT_TIME_MS, time_ms, 0);
+  }
+  #[inline]
+  pub fn add_messages(&mut self, messages: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<DesktopNotificationMessage<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(DesktopNotification::VT_MESSAGES, messages);
+  }
+  #[inline]
+  pub fn add_clearable(&mut self, clearable: bool) {
+    self.fbb_.push_slot::<bool>(DesktopNotification::VT_CLEARABLE, clearable, true);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> DesktopNotificationBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     DesktopNotificationBuilder {
@@ -10762,6 +10972,12 @@ impl core::fmt::Debug for DesktopNotification<'_> {
       ds.field("progress", &self.progress());
       ds.field("has_progress", &self.has_progress());
       ds.field("expire_timeout_ms", &self.expire_timeout_ms());
+      ds.field("alert", &self.alert());
+      ds.field("group_key", &self.group_key());
+      ds.field("group_summary", &self.group_summary());
+      ds.field("time_ms", &self.time_ms());
+      ds.field("messages", &self.messages());
+      ds.field("clearable", &self.clearable());
       ds.finish()
   }
 }

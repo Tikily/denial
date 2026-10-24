@@ -949,6 +949,26 @@ class AppLocalizationsZh extends AppLocalizations {
   String get notificationGeneric => '通知';
 
   @override
+  String notificationGroupCollapse(String applicationName) {
+    return '收起$applicationName的通知';
+  }
+
+  @override
+  String notificationGroupExpand(int count, String applicationName) {
+    return '显示$applicationName的 $count 条通知';
+  }
+
+  @override
+  String notificationGroupHeader(String applicationName, int count) {
+    return '$applicationName · $count';
+  }
+
+  @override
+  String notificationMessage(String sender, String text) {
+    return '$sender：$text';
+  }
+
+  @override
   String get notificationNew => '新通知';
 
   @override
@@ -985,16 +1005,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get notificationsCloseCenter => '关闭通知中心';
 
   @override
-  String get notificationsClosed => '已关闭';
-
-  @override
-  String get notificationsClosedByApplication => '已由应用关闭';
-
-  @override
   String get notificationsDisableDoNotDisturb => '关闭免打扰';
-
-  @override
-  String get notificationsDismissed => '已忽略';
 
   @override
   String get notificationsDoNotDisturbSemantics => '免打扰已开启。普通横幅将保持静默，重要通知仍可显示。';
@@ -1004,9 +1015,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get notificationsEnableDoNotDisturb => '开启免打扰';
-
-  @override
-  String get notificationsExpired => '已过期';
 
   @override
   String get notificationsLoadingPolicy => '正在加载免打扰策略';
@@ -4764,6 +4772,11 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get lockEnterPin => '输入 PIN 码';
+
+  @override
+  String lockEnterPinToOpen(String applicationName) {
+    return '输入 PIN 码以打开$applicationName';
+  }
 
   @override
   String lockPinProgress(int entered, int length) {

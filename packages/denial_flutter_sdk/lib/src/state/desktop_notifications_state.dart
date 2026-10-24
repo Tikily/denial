@@ -3,35 +3,67 @@ import 'package:meta/meta.dart';
 import '../models/desktop_notification.dart';
 import '../models/notification_policy.dart';
 
+/// One notification in history. History holds exactly the notifications
+/// deniald still has; a closed one leaves it.
 @immutable
 class DesktopNotificationRecord {
   const DesktopNotificationRecord({
     required this.notification,
     required this.sequence,
-    required this.active,
     required this.unread,
-    this.closeReason = 0,
   });
 
   final DesktopNotification notification;
   final int sequence;
-  final bool active;
   final bool unread;
-  final int closeReason;
 
   DesktopNotificationRecord copyWith({
     DesktopNotification? notification,
-    bool? active,
     bool? unread,
-    int? closeReason,
   }) {
     return DesktopNotificationRecord(
       notification: notification ?? this.notification,
       sequence: sequence,
-      active: active ?? this.active,
       unread: unread ?? this.unread,
-      closeReason: closeReason ?? this.closeReason,
     );
+  }
+}
+
+/// Notifications that belong together, as history shows them. deniald keeps
+/// group keys inside one app; without a sender group, the app is the group.
+@immutable
+class DesktopNotificationGroup {
+  const DesktopNotificationGroup({
+    required this.key,
+    required this.members,
+    this.summary,
+  });
+
+  final String key;
+
+  /// Newest first. A group the sender only summarized shows its summary.
+  final List<DesktopNotificationRecord> members;
+
+  /// The sender's own stand-in for the group, when it posted one.
+  final DesktopNotificationRecord? summary;
+
+  /// Two or more members stack into one card.
+  bool get stacked => members.length >= 2;
+
+  DesktopNotificationRecord get newest => members.first;
+
+  bool get unread => members.any((record) => record.unread);
+
+  /// Whether a swipe or Clear all can remove anything from it.
+  bool get clearable =>
+      members.any((record) => record.notification.clearable) ||
+      (summary?.notification.clearable ?? false);
+
+  /// Every notification of the group, summary included.
+  Iterable<DesktopNotificationRecord> get records sync* {
+    yield* members;
+    final summary = this.summary;
+    if (summary != null && !members.contains(summary)) yield summary;
   }
 }
 
@@ -85,6 +117,10 @@ class DesktopNotificationsState {
     return notifications.isEmpty ? null : notifications.first;
   }
 
+  /// History as groups, newest first; derived once per history.
+  List<DesktopNotificationGroup> get groups =>
+      _groups[history] ??= _groupHistory(history);
+
   int get unreadCount {
     var count = 0;
     for (final record in history) {
@@ -93,6 +129,36 @@ class DesktopNotificationsState {
       }
     }
     return count;
+  }
+
+  static final _groups = Expando<List<DesktopNotificationGroup>>();
+
+  static List<DesktopNotificationGroup> _groupHistory(
+    List<DesktopNotificationRecord> history,
+  ) {
+    final members = <String, List<DesktopNotificationRecord>>{};
+    final summaries = <String, List<DesktopNotificationRecord>>{};
+    for (final record in history) {
+      final notification = record.notification;
+      final key = notification.groupingKey;
+      members.putIfAbsent(key, () => []);
+      summaries.putIfAbsent(key, () => []);
+      if (notification.groupSummary) {
+        summaries[key]!.add(record);
+      } else {
+        members[key]!.add(record);
+      }
+    }
+    return List<DesktopNotificationGroup>.unmodifiable([
+      for (final MapEntry(:key, value: records) in members.entries)
+        DesktopNotificationGroup(
+          key: key,
+          members: List<DesktopNotificationRecord>.unmodifiable(
+            records.isEmpty ? summaries[key]! : records,
+          ),
+          summary: summaries[key]!.firstOrNull,
+        ),
+    ]);
   }
 
   DesktopNotificationsState copyWith({

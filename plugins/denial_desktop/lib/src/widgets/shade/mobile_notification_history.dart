@@ -1,3 +1,4 @@
+import 'package:denial_desktop/src/state/notification_groups.dart';
 import 'package:denial_desktop/src/state/reference_shell_controller.dart';
 
 import 'package:flutter/material.dart' show Icons;
@@ -12,8 +13,10 @@ import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/rendering.dart'
     show WindowBackdropCache, WindowBackdropMotion;
 import 'package:denial_flutter_sdk/shell_theme.dart';
+import 'package:denial_flutter_sdk/tokens.dart' show ShellText;
 
 import '../notification_banner.dart';
+import '../notification_rows.dart';
 import '../mobile_ui_metrics.dart';
 import 'notification_shade_list.dart';
 import 'shade_backdrop_scene.dart';
@@ -143,11 +146,16 @@ class _MobileNotificationHistoryState
       referenceShellProvider.select((state) => state.lockLayerVisible),
     );
     final preview = locked ? state.lockPreview : NotificationPreviewMode.full;
-    final records = preview == NotificationPreviewMode.hidden
-        ? const <DesktopNotificationRecord>[]
-        : state.history;
-    final indices = <int, int>{
-      for (var i = 0; i < records.length; i++) records[i].notification.id: i,
+    final groups = preview == NotificationPreviewMode.hidden
+        ? const <DesktopNotificationGroup>[]
+        : state.groups;
+    // Locked, groups stay folded and history only shows.
+    final rows = notificationHistoryRows(
+      groups,
+      locked ? const <String>{} : ref.watch(expandedNotificationGroupsProvider),
+    );
+    final indices = <Object, int>{
+      for (var i = 0; i < rows.length; i++) rows[i].key: i,
     };
     _scheduleAcknowledgement();
     // Clamping physics only installs a scroll drag recognizer when content
@@ -174,7 +182,7 @@ class _MobileNotificationHistoryState
               onRowsMoved: _rowMotion.moved,
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
-                  if (index == records.length) {
+                  if (index == rows.length) {
                     final padding = MediaQuery.viewPaddingOf(context);
                     final metrics = MobileUiMetrics.of(context);
                     return _ColorOsNotificationReveal(
@@ -206,36 +214,60 @@ class _MobileNotificationHistoryState
                       ),
                     );
                   }
-                  final record = records[index];
+                  final row = rows[index];
+                  final key = ValueKey<Object>(row.key);
                   return _ColorOsNotificationReveal(
                     reveal: _revealOf(index),
                     index: index,
                     cachedGlass: cachedGlass,
-                    child: _HistoryNotification(
-                      key: ValueKey(record.notification.id),
-                      record: record,
-                      preview: preview,
-                      interactive: !locked,
-                      onDismiss: () =>
-                          controller.dismissFromHistory(record.notification.id),
-                      onOpen: () {
-                        if (controller.invokeDefaultAction(
+                    child: switch (row) {
+                      NotificationGroupHeaderRow(:final group) =>
+                        _HistoryGroupHeader(
+                          key: key,
+                          group: group,
+                          onCollapse: () => ref
+                              .read(expandedNotificationGroupsProvider.notifier)
+                              .collapse(group.key),
+                        ),
+                      NotificationGroupRow(:final group) =>
+                        _HistoryNotification(
+                          key: key,
+                          record: group.newest,
+                          group: group,
+                          preview: preview,
+                          interactive: !locked,
+                          onDismiss: () =>
+                              controller.dismissGroupFromHistory(group.key),
+                          onExpand: () => ref
+                              .read(expandedNotificationGroupsProvider.notifier)
+                              .expand(group.key),
+                        ),
+                      NotificationRow(:final record) => _HistoryNotification(
+                        key: key,
+                        record: record,
+                        preview: preview,
+                        interactive: !locked,
+                        onDismiss: () => controller.dismissFromHistory(
                           record.notification.id,
-                        )) {
-                          ref
-                              .read(referenceShellProvider.notifier)
-                              .closeQuickSettings();
-                        }
-                      },
-                      onAction: (key) =>
-                          controller.invokeAction(record.notification.id, key),
-                    ),
+                        ),
+                        onOpen: () {
+                          if (openNotification(ref, record.notification.id)) {
+                            ref
+                                .read(referenceShellProvider.notifier)
+                                .closeQuickSettings();
+                          }
+                        },
+                        onAction: (key) => controller.invokeAction(
+                          record.notification.id,
+                          key,
+                        ),
+                      ),
+                    },
                   );
                 },
-                childCount:
-                    records.length + (records.isNotEmpty && !locked ? 1 : 0),
+                childCount: rows.length + (rows.isNotEmpty && !locked ? 1 : 0),
                 findChildIndexCallback: (key) =>
-                    key is ValueKey<int> && indices.containsKey(key.value)
+                    key is ValueKey && indices.containsKey(key.value)
                     ? indices[key.value]
                     : null,
               ),
@@ -343,8 +375,10 @@ class _HistoryNotification extends StatelessWidget {
     required this.preview,
     required this.interactive,
     required this.onDismiss,
-    required this.onOpen,
-    required this.onAction,
+    this.onOpen,
+    this.onAction,
+    this.group,
+    this.onExpand,
     super.key,
   });
 
@@ -352,14 +386,20 @@ class _HistoryNotification extends StatelessWidget {
   final NotificationPreviewMode preview;
   final bool interactive;
   final bool Function() onDismiss;
-  final VoidCallback onOpen;
-  final ValueChanged<String> onAction;
+  final VoidCallback? onOpen;
+  final ValueChanged<String>? onAction;
+
+  /// A stacked group this row stands for, collapsed; a tap runs [onExpand].
+  final DesktopNotificationGroup? group;
+  final VoidCallback? onExpand;
 
   @override
   Widget build(BuildContext context) {
     final notification = record.notification;
     final padding = MediaQuery.viewPaddingOf(context);
     final metrics = MobileUiMetrics.of(context);
+    final clearable =
+        interactive && (group?.clearable ?? notification.clearable);
     return Padding(
       padding: EdgeInsets.fromLTRB(
         padding.left + metrics.visual(MobileNotificationCard.horizontalMargin),
@@ -369,7 +409,7 @@ class _HistoryNotification extends StatelessWidget {
       ),
       child: Dismissible(
         key: ValueKey(notification.id),
-        direction: interactive
+        direction: clearable
             ? DismissDirection.horizontal
             : DismissDirection.none,
         onUpdate: (_) => NotificationShadeList.invalidateOcclusion(context),
@@ -380,7 +420,7 @@ class _HistoryNotification extends StatelessWidget {
           return false;
         },
         child: Semantics(
-          onDismiss: interactive
+          onDismiss: clearable
               ? () {
                   onDismiss();
                 }
@@ -391,8 +431,10 @@ class _HistoryNotification extends StatelessWidget {
             groupedBackdrop: true,
             cachedBackdrop: true,
             previewMode: preview,
-            onDefaultAction: record.active ? onOpen : null,
-            onAction: record.active ? onAction : null,
+            group: group,
+            onExpandGroup: onExpand,
+            onDefaultAction: onOpen,
+            onAction: onAction,
             surfaceBuilder: (context, card) {
               final radius = BorderRadius.circular(
                 metrics.visual(ShellTheme.of(context).panelRadius),
@@ -402,6 +444,66 @@ class _HistoryNotification extends StatelessWidget {
                 child: ShadeBackdropRegion(borderRadius: radius, child: card),
               );
             },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Above an opened group's members: its app and count, and a button that
+/// folds it back into one card.
+class _HistoryGroupHeader extends StatelessWidget {
+  const _HistoryGroupHeader({
+    required this.group,
+    required this.onCollapse,
+    super.key,
+  });
+
+  final DesktopNotificationGroup group;
+  final VoidCallback onCollapse;
+
+  @override
+  Widget build(BuildContext context) {
+    final padding = MediaQuery.viewPaddingOf(context);
+    final metrics = MobileUiMetrics.of(context);
+    final l10n = context.l10n;
+    final appName = notificationAppName(group.newest.notification, l10n);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        padding.left +
+            metrics.visual(
+              MobileNotificationCard.horizontalMargin +
+                  MobileNotificationMetrics.horizontalContentInset,
+            ),
+        0,
+        padding.right + metrics.visual(MobileNotificationCard.horizontalMargin),
+        0,
+      ),
+      child: Builder(
+        builder: (context) => NotificationReveal.revealed(
+          context,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l10n.notificationGroupHeader(appName, group.members.length),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ShellText.base.copyWith(
+                    color: context.shellColors.textSecondary,
+                    fontSize: MobileNotificationMetrics.groupHeaderFontSize,
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                  ),
+                ),
+              ),
+              _HistoryButton(
+                label: l10n.notificationGroupCollapse(appName),
+                icon: Icons.expand_less_rounded,
+                onPressed: onCollapse,
+              ),
+            ],
           ),
         ),
       ),
@@ -461,13 +563,15 @@ class ClearNotificationHistoryButton extends ConsumerWidget {
   const ClearNotificationHistoryButton({super.key});
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final hasHistory = ref.watch(
-      desktopNotificationsProvider.select((s) => s.history.isNotEmpty),
+    final canClear = ref.watch(
+      desktopNotificationsProvider.select(
+        (s) => s.history.any((record) => record.notification.clearable),
+      ),
     );
     final locked = ref.watch(
       referenceShellProvider.select((s) => s.lockLayerVisible),
     );
-    if (!hasHistory || locked) return const SizedBox.shrink();
+    if (!canClear || locked) return const SizedBox.shrink();
     return _HistoryButton(
       label: context.l10n.notificationsClearAll,
       icon: Icons.clear_all_rounded,

@@ -11,7 +11,9 @@ import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/tokens.dart';
 
+import '../state/notification_groups.dart';
 import 'notification_banner.dart';
+import 'notification_rows.dart';
 
 class NotificationCenter extends ConsumerStatefulWidget {
   const NotificationCenter({
@@ -39,7 +41,11 @@ class _NotificationCenterState extends ConsumerState<NotificationCenter> {
     final policyLoaded =
         ref.watch(shellSettingsSyncStatusProvider).phase ==
         ShellSettingsSyncPhase.ready;
-    final records = state.history;
+    final rows = notificationHistoryRows(
+      state.groups,
+      ref.watch(expandedNotificationGroupsProvider),
+    );
+    final groups = ref.read(expandedNotificationGroupsProvider.notifier);
     if (widget.active && state.unreadCount > 0 && !_markReadScheduled) {
       _markReadScheduled = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -59,7 +65,9 @@ class _NotificationCenterState extends ConsumerState<NotificationCenter> {
             unreadCount: state.unreadCount,
             doNotDisturb: state.doNotDisturb,
             policyLoaded: policyLoaded,
-            hasNotifications: records.isNotEmpty || state.active.isNotEmpty,
+            canClear: state.active.values.any(
+              (notification) => notification.clearable,
+            ),
             onToggleDoNotDisturb: controller.toggleDoNotDisturb,
             onClearAll: controller.clearAll,
           ),
@@ -76,66 +84,58 @@ class _NotificationCenterState extends ConsumerState<NotificationCenter> {
               child: _DoNotDisturbNotice(),
             ),
           Expanded(
-            child: records.isEmpty
+            child: rows.isEmpty
                 ? const _NotificationEmptyState()
                 : Semantics(
                     role: .list,
                     child: ListView.separated(
                       key: const PageStorageKey<String>('notification-history'),
-                      itemCount: records.length,
+                      itemCount: rows.length,
                       padding: const EdgeInsets.only(bottom: 6),
                       separatorBuilder: (_, _) => const SizedBox(height: 9),
                       itemBuilder: (context, index) {
-                        final record = records[index];
-                        final notification = record.notification;
+                        final row = rows[index];
                         return RepaintBoundary(
-                          key: ValueKey<int>(notification.id),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
+                          key: ValueKey<Object>(row.key),
+                          child: switch (row) {
+                            NotificationGroupHeaderRow(:final group) =>
+                              _NotificationGroupHeader(
+                                group: group,
+                                onCollapse: () => groups.collapse(group.key),
+                              ),
+                            NotificationGroupRow(:final group) =>
                               DesktopNotificationSwipeDismiss(
-                                onDismiss: () => controller.dismissFromHistory(
-                                  notification.id,
-                                ),
+                                enabled: group.clearable,
+                                onDismiss: () => controller
+                                    .dismissGroupFromHistory(group.key),
                                 child: NotificationCard(
-                                  notification: notification,
+                                  notification: group.newest.notification,
                                   compact: true,
-                                  onDefaultAction: record.active
-                                      ? () => controller.invokeDefaultAction(
-                                          notification.id,
-                                        )
-                                      : null,
-                                  onAction: record.active
-                                      ? (actionKey) => controller.invokeAction(
-                                          notification.id,
-                                          actionKey,
-                                        )
-                                      : null,
+                                  group: group,
+                                  onExpandGroup: () => groups.expand(group.key),
                                 ),
                               ),
-                              if (!record.active)
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    top: 4,
-                                    right: 8,
-                                  ),
-                                  child: Align(
-                                    alignment: Alignment.centerRight,
-                                    child: Text(
-                                      _closeReasonLabel(
-                                        record.closeReason,
-                                        context.l10n,
-                                      ),
-                                      style: ShellText.base.copyWith(
-                                        color: context.shellColors.textTertiary,
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
+                            NotificationRow(:final record) =>
+                              DesktopNotificationSwipeDismiss(
+                                enabled: record.notification.clearable,
+                                onDismiss: () => controller.dismissFromHistory(
+                                  record.notification.id,
                                 ),
-                            ],
-                          ),
+                                child: NotificationCard(
+                                  notification: record.notification,
+                                  compact: true,
+                                  onDefaultAction: () => openNotification(
+                                    ref,
+                                    record.notification.id,
+                                  ),
+                                  onAction: (actionKey) =>
+                                      controller.invokeAction(
+                                        record.notification.id,
+                                        actionKey,
+                                      ),
+                                ),
+                              ),
+                          },
                         );
                       },
                     ),
@@ -153,7 +153,7 @@ class _NotificationCenterHeader extends StatelessWidget {
     required this.unreadCount,
     required this.doNotDisturb,
     required this.policyLoaded,
-    required this.hasNotifications,
+    required this.canClear,
     required this.onToggleDoNotDisturb,
     required this.onClearAll,
   });
@@ -162,7 +162,7 @@ class _NotificationCenterHeader extends StatelessWidget {
   final int unreadCount;
   final bool doNotDisturb;
   final bool policyLoaded;
-  final bool hasNotifications;
+  final bool canClear;
   final VoidCallback onToggleDoNotDisturb;
   final VoidCallback onClearAll;
 
@@ -214,7 +214,7 @@ class _NotificationCenterHeader extends StatelessWidget {
         _CenterIconButton(
           label: l10n.notificationsClearAll,
           icon: Icons.clear_all_rounded,
-          enabled: hasNotifications,
+          enabled: canClear,
           onPressed: onClearAll,
         ),
       ],
@@ -463,6 +463,49 @@ class _NotificationEmptyState extends StatelessWidget {
   }
 }
 
+/// Above an opened group's members: its app and count, and a button that
+/// folds it back into one card.
+class _NotificationGroupHeader extends StatelessWidget {
+  const _NotificationGroupHeader({
+    required this.group,
+    required this.onCollapse,
+  });
+
+  final DesktopNotificationGroup group;
+  final VoidCallback onCollapse;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final appName = notificationAppName(group.newest.notification, l10n);
+    return Padding(
+      padding: const EdgeInsets.only(left: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              l10n.notificationGroupHeader(appName, group.members.length),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: ShellText.base.copyWith(
+                color: context.shellColors.textSecondary,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                height: 1.2,
+              ),
+            ),
+          ),
+          _CenterIconButton(
+            label: l10n.notificationGroupCollapse(appName),
+            icon: Icons.expand_less_rounded,
+            onPressed: onCollapse,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CenterIconButton extends StatefulWidget {
   const _CenterIconButton({
     required this.label,
@@ -550,10 +593,3 @@ class _CenterIconButtonState extends State<_CenterIconButton> {
     );
   }
 }
-
-String _closeReasonLabel(int reason, AppLocalizations l10n) => switch (reason) {
-  1 => l10n.notificationsExpired,
-  2 => l10n.notificationsDismissed,
-  3 => l10n.notificationsClosedByApplication,
-  _ => l10n.notificationsClosed,
-};

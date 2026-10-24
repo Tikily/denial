@@ -1,4 +1,6 @@
+import 'package:denial_desktop/src/state/notification_groups.dart';
 import 'package:denial_desktop/src/state/reference_shell_controller.dart';
+import 'package:denial_desktop/src/widgets/notification_open.dart';
 
 import 'dart:async';
 
@@ -82,8 +84,10 @@ class _ShellRuntimeBindingsState extends ConsumerState<ShellRuntimeBindings> {
       referenceShellProvider.select((state) => state.lockLayerVisible),
       (_, lockLayerVisible) {
         if (!lockLayerVisible) {
+          openLockNotification(ref);
           return;
         }
+        ref.read(lockNotificationOpenProvider.notifier).clear();
         ref.read(shellPopupControllerProvider.notifier).dismissAllImmediately();
         widget.onLocked?.call(ref);
       },

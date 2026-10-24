@@ -52,8 +52,6 @@ class DesktopNotificationsController extends Notifier<DesktopNotificationsState>
 
   static const int maxActiveNotifications =
       DesktopNotificationReducer.maxActiveNotifications;
-  static const int maxHistoryEntries =
-      DesktopNotificationReducer.maxHistoryEntries;
   static const int maxBannerQueue = DesktopNotificationReducer.maxBannerQueue;
 
   late void Function(String message)? _logger;
@@ -66,19 +64,29 @@ class DesktopNotificationsController extends Notifier<DesktopNotificationsState>
   final Map<int, Set<String>> _invokedActions = <int, Set<String>>{};
   late DesktopNotificationReducer _reducer;
 
+  /// A notification the user can't clear only leaves its banner.
   bool dismiss(int notificationId) {
-    if (!state.active.containsKey(notificationId) ||
+    final notification = state.active[notificationId];
+    if (notification == null ||
         state.pendingDismissals.contains(notificationId)) {
       return false;
     }
+    if (!notification.clearable) {
+      hideBanner(notificationId);
+      return true;
+    }
+    final summaries = _summariesLeftBy(notificationId);
     if (!_dismiss(notificationId)) {
       return false;
     }
     _markDismissalPending(notificationId);
+    summaries.forEach(dismiss);
     return true;
   }
 
   bool dismissFromHistory(int notificationId) {
+    if (state.active[notificationId]?.clearable == false) return false;
+    final summaries = _summariesLeftBy(notificationId);
     final active = state.active.containsKey(notificationId);
     if (active &&
         !state.pendingDismissals.contains(notificationId) &&
@@ -101,14 +109,57 @@ class DesktopNotificationsController extends Notifier<DesktopNotificationsState>
       ),
       pendingDismissals: Set<int>.unmodifiable(pending),
     );
+    summaries.forEach(dismissFromHistory);
     return true;
+  }
+
+  /// A group's summary leaves with the group's last member.
+  List<int> _summariesLeftBy(int notificationId) {
+    final notification = state.active[notificationId];
+    if (notification == null ||
+        notification.groupSummary ||
+        notification.groupKey.isEmpty) {
+      return const [];
+    }
+    final rest = state.active.values.where(
+      (other) =>
+          other.id != notificationId &&
+          other.groupKey == notification.groupKey &&
+          !state.pendingDismissals.contains(other.id),
+    );
+    if (rest.any((other) => !other.groupSummary)) return const [];
+    return [
+      for (final summary in rest)
+        if (summary.clearable) summary.id,
+    ];
+  }
+
+  /// Dismisses what the user can clear of a group; true if anything left.
+  bool dismissGroupFromHistory(String groupKey) {
+    final group = state.groups
+        .where((candidate) => candidate.key == groupKey)
+        .firstOrNull;
+    if (group == null) return false;
+    var dismissed = false;
+    for (final record in group.records) {
+      if (record.notification.clearable &&
+          dismissFromHistory(record.notification.id)) {
+        dismissed = true;
+      }
+    }
+    return dismissed;
   }
 
   void clearAll() {
     final pending = Set<int>.of(state.pendingDismissals);
+    // Kept: dismissals that failed and notifications the user can't clear.
     final failed = <int>{};
-    for (final id in state.active.keys) {
+    for (final MapEntry(key: id, value: notification) in state.active.entries) {
       if (pending.contains(id)) {
+        continue;
+      }
+      if (!notification.clearable) {
+        failed.add(id);
         continue;
       }
       if (_dismiss(id)) {
@@ -121,7 +172,7 @@ class DesktopNotificationsController extends Notifier<DesktopNotificationsState>
     state = state.copyWith(
       history: List<DesktopNotificationRecord>.unmodifiable(
         state.history.where(
-          (record) => record.active && failed.contains(record.notification.id),
+          (record) => failed.contains(record.notification.id),
         ),
       ),
       bannerQueue: List<int>.unmodifiable(
@@ -259,6 +310,7 @@ class DesktopNotificationsController extends Notifier<DesktopNotificationsState>
     final notification = event.notification;
     if (event.kind == DesktopNotificationEventKind.closed ||
         notification == null ||
+        !notification.alert ||
         notification.historyOnly ||
         !state.bannerQueue.contains(notification.id) ||
         !ref.read(shellSettingsProvider).notifications.wakeScreen) {

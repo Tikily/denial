@@ -32,6 +32,7 @@ const int denialWireMaxRegions = 8192;
 const int denialWireMaxSurfaces = 32768;
 const int denialWireMaxStringLength = 4096;
 const int denialWireMaxNotificationActions = 16;
+const int denialWireMaxNotificationMessages = 5;
 const int denialWireMaxNotificationImageBytes = 512 * 1024;
 const int denialWireMaxTrayIconBytes = 512 * 1024;
 const int denialWireMaxLocalAppIdBytes = 256;
@@ -1321,6 +1322,9 @@ class DenialWireCodec {
     final imagePath = source.imagePath ?? '';
     final soundName = source.soundName ?? '';
     final soundFile = source.soundFile ?? '';
+    final groupKey = source.groupKey ?? '';
+    final sourceMessages =
+        source.messages ?? const <generated.DesktopNotificationMessage>[];
     final sourceActions =
         source.actions ?? const <generated.DesktopNotificationAction>[];
     if (sender.length > denialWireMaxStringLength ||
@@ -1333,7 +1337,9 @@ class DenialWireCodec {
         imagePath.length > denialWireMaxStringLength ||
         soundName.length > denialWireMaxStringLength ||
         soundFile.length > denialWireMaxStringLength ||
-        sourceActions.length > denialWireMaxNotificationActions) {
+        groupKey.length > denialWireMaxStringLength ||
+        sourceActions.length > denialWireMaxNotificationActions ||
+        sourceMessages.length > denialWireMaxNotificationMessages) {
       rejectedStructuredMessages += 1;
       return null;
     }
@@ -1348,6 +1354,20 @@ class DenialWireCodec {
         return null;
       }
       actions.add(model.DesktopNotificationAction(key: key, label: label));
+    }
+
+    final messages = <model.DesktopNotificationMessage>[];
+    for (final message in sourceMessages) {
+      final sender = message.sender ?? '';
+      final text = message.text ?? '';
+      if (sender.length > denialWireMaxStringLength ||
+          text.length > denialWireMaxStringLength) {
+        rejectedStructuredMessages += 1;
+        return null;
+      }
+      messages.add(
+        model.DesktopNotificationMessage(sender: sender, text: text),
+      );
     }
 
     model.DesktopNotificationImageData? image;
@@ -1416,6 +1436,12 @@ class DenialWireCodec {
         progress: source.progress,
         hasProgress: source.hasProgress,
         expireTimeoutMs: source.expireTimeoutMs,
+        alert: source.alert,
+        groupKey: groupKey,
+        groupSummary: source.groupSummary,
+        timeMs: source.timeMs,
+        messages: List<model.DesktopNotificationMessage>.unmodifiable(messages),
+        clearable: source.clearable,
       ),
     );
   }

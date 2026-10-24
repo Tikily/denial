@@ -1378,6 +1378,51 @@
   "@notificationGeneric": {
     "description": "English UI text for notificationGeneric."
   },
+  "notificationGroupCollapse": "Collapse notifications from {applicationName}",
+  "@notificationGroupCollapse": {
+    "description": "Button that folds an expanded notification group back into one card.",
+    "placeholders": {
+      "applicationName": {
+        "type": "String"
+      }
+    }
+  },
+  "notificationGroupExpand": "Show {count} notifications from {applicationName}",
+  "@notificationGroupExpand": {
+    "description": "Tapping a stacked notification group shows its notifications.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "applicationName": {
+        "type": "String"
+      }
+    }
+  },
+  "notificationGroupHeader": "{applicationName} · {count}",
+  "@notificationGroupHeader": {
+    "description": "Header of a stacked notification group: app and how many notifications it holds.",
+    "placeholders": {
+      "applicationName": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "notificationMessage": "{sender}: {text}",
+  "@notificationMessage": {
+    "description": "One message of a conversation in a notification.",
+    "placeholders": {
+      "sender": {
+        "type": "String"
+      },
+      "text": {
+        "type": "String"
+      }
+    }
+  },
   "notificationNew": "New notification",
   "@notificationNew": {
     "description": "English UI text for notificationNew."
@@ -1439,21 +1484,9 @@
   "@notificationsCloseCenter": {
     "description": "English UI text for notificationsCloseCenter."
   },
-  "notificationsClosed": "Closed",
-  "@notificationsClosed": {
-    "description": "English UI text for notificationsClosed."
-  },
-  "notificationsClosedByApplication": "Closed by application",
-  "@notificationsClosedByApplication": {
-    "description": "English UI text for notificationsClosedByApplication."
-  },
   "notificationsDisableDoNotDisturb": "Disable do not disturb",
   "@notificationsDisableDoNotDisturb": {
     "description": "English UI text for notificationsDisableDoNotDisturb."
-  },
-  "notificationsDismissed": "Dismissed",
-  "@notificationsDismissed": {
-    "description": "English UI text for notificationsDismissed."
   },
   "notificationsDoNotDisturbSemantics": "Do not disturb is on. Ordinary banners are silent. Critical notifications can still appear.",
   "@notificationsDoNotDisturbSemantics": {
@@ -1466,10 +1499,6 @@
   "notificationsEnableDoNotDisturb": "Enable do not disturb",
   "@notificationsEnableDoNotDisturb": {
     "description": "English UI text for notificationsEnableDoNotDisturb."
-  },
-  "notificationsExpired": "Expired",
-  "@notificationsExpired": {
-    "description": "English UI text for notificationsExpired."
   },
   "notificationsLoadingPolicy": "Loading do not disturb policy",
   "@notificationsLoadingPolicy": {
@@ -6675,6 +6704,15 @@
   "lockEnterPin": "Enter PIN",
   "@lockEnterPin": {
     "description": "Title above the lock screen PIN entry."
+  },
+  "lockEnterPinToOpen": "Enter PIN to open {applicationName}",
+  "@lockEnterPinToOpen": {
+    "description": "Title above the lock screen PIN entry after a notification was tapped; it opens once unlocked.",
+    "placeholders": {
+      "applicationName": {
+        "type": "String"
+      }
+    }
   },
   "lockPinProgress": "PIN, {entered} of {length} digits entered",
   "@lockPinProgress": {

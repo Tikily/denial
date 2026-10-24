@@ -985,6 +985,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notificationGeneric => 'Notification';
 
   @override
+  String notificationGroupCollapse(String applicationName) {
+    return 'Collapse notifications from $applicationName';
+  }
+
+  @override
+  String notificationGroupExpand(int count, String applicationName) {
+    return 'Show $count notifications from $applicationName';
+  }
+
+  @override
+  String notificationGroupHeader(String applicationName, int count) {
+    return '$applicationName · $count';
+  }
+
+  @override
+  String notificationMessage(String sender, String text) {
+    return '$sender: $text';
+  }
+
+  @override
   String get notificationNew => 'New notification';
 
   @override
@@ -1021,16 +1041,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notificationsCloseCenter => 'Close notification center';
 
   @override
-  String get notificationsClosed => 'Closed';
-
-  @override
-  String get notificationsClosedByApplication => 'Closed by application';
-
-  @override
   String get notificationsDisableDoNotDisturb => 'Disable do not disturb';
-
-  @override
-  String get notificationsDismissed => 'Dismissed';
 
   @override
   String get notificationsDoNotDisturbSemantics =>
@@ -1042,9 +1053,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get notificationsEnableDoNotDisturb => 'Enable do not disturb';
-
-  @override
-  String get notificationsExpired => 'Expired';
 
   @override
   String get notificationsLoadingPolicy => 'Loading do not disturb policy';
@@ -5018,6 +5026,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get lockEnterPin => 'Enter PIN';
+
+  @override
+  String lockEnterPinToOpen(String applicationName) {
+    return 'Enter PIN to open $applicationName';
+  }
 
   @override
   String lockPinProgress(int entered, int length) {

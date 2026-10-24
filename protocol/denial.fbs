@@ -780,6 +780,11 @@ table DesktopNotificationImageData {
   data:[ubyte];
 }
 
+table DesktopNotificationMessage {
+  sender:string;
+  text:string;
+}
+
 // Normalized org.freedesktop.Notifications data. Unknown D-Bus hints stay on
 // the native side rather than crossing the bridge as arbitrary variants.
 table DesktopNotification {
@@ -807,6 +812,20 @@ table DesktopNotification {
   progress:int;
   has_progress:bool;
   expire_timeout_ms:int = -1;
+  // Whether this post alerts: banner and screen wake. Replays and updates
+  // that change no content arrive quiet.
+  alert:bool = true;
+  // Display grouping: the sender's own group within its app, or just its app.
+  group_key:string;
+  // The group's summary, which stands for the group rather than beside it.
+  group_summary:bool;
+  // Milliseconds since the epoch: the sender's time, else when deniald got it.
+  time_ms:long;
+  // The latest messages of a conversation, oldest first.
+  messages:[DesktopNotificationMessage];
+  // False for notifications the user can't dismiss; they leave only when the
+  // app closes them.
+  clearable:bool = true;
 }
 
 table DesktopNotificationEvent {

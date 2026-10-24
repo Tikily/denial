@@ -46,7 +46,13 @@ class _MobileNotificationBannerViewState
   @override
   void didUpdateWidget(covariant MobileNotificationBannerView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.notification != widget.notification) _armTimeout();
+    final previous = oldWidget.notification;
+    final next = widget.notification;
+    // A quiet update keeps the banner's remaining time.
+    if (previous?.id != next?.id ||
+        (next != null && next.alert && !identical(previous, next))) {
+      _armTimeout();
+    }
   }
 
   void _armTimeout() {

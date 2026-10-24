@@ -777,12 +777,15 @@ class _LockDepthForegroundState extends ConsumerState<_LockDepthForeground> {
 
 /// The phone's notifications under the clock, as many as fit, newest first,
 /// unless the lock screen settings hide them. They slide with the face and
-/// let touches through to the swipe.
+/// let drags through to the swipe; a tap asks for the PIN, then opens.
 class _LockNotifications extends ConsumerWidget {
-  const _LockNotifications({required this.scale});
+  const _LockNotifications({required this.scale, required this.onOpen});
 
   /// The clock's scale, which moves its lower edge.
   final double scale;
+
+  /// The tapped group's key.
+  final ValueChanged<String> onOpen;
 
   static const int _shown = 3;
 
@@ -794,8 +797,9 @@ class _LockNotifications extends ConsumerWidget {
       return const SizedBox.shrink();
     }
     // The shade's history: a notification stays after its popup is gone.
-    final records = state.history.take(_shown).toList(growable: false);
-    if (records.isEmpty) {
+    // A stacked group is one card with its app and count.
+    final groups = state.groups.take(_shown).toList(growable: false);
+    if (groups.isEmpty) {
       return const SizedBox.shrink();
     }
     // The same block _LockClockBlock lays the mobile time out in.
@@ -818,9 +822,9 @@ class _LockNotifications extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (final record in records)
+              for (final group in groups)
                 Padding(
-                  key: ValueKey(record.notification.id),
+                  key: ValueKey(group.key),
                   padding: EdgeInsets.fromLTRB(
                     metrics.visual(MobileNotificationCard.horizontalMargin),
                     0,
@@ -830,16 +834,26 @@ class _LockNotifications extends ConsumerWidget {
                   // Swiped aside, it leaves the history; a swipe up
                   // still opens the phone.
                   child: Dismissible(
-                    key: ValueKey(record.notification.id),
+                    key: ValueKey(group.key),
+                    direction: group.clearable
+                        ? DismissDirection.horizontal
+                        : DismissDirection.none,
                     confirmDismiss: (_) async {
-                      // The controller drops the row when it can.
-                      notifications.dismissFromHistory(record.notification.id);
+                      // The controller drops the rows when it can.
+                      notifications.dismissGroupFromHistory(group.key);
                       return false;
                     },
-                    child: MobileNotificationCard(
-                      notification: record.notification,
-                      interactive: false,
-                      previewMode: state.lockPreview,
+                    child: _LockNotificationPress(
+                      onTap: () {
+                        ref.read(hapticsServiceProvider).pulse();
+                        onOpen(group.key);
+                      },
+                      child: MobileNotificationCard(
+                        notification: group.newest.notification,
+                        group: group,
+                        interactive: false,
+                        previewMode: state.lockPreview,
+                      ),
                     ),
                   ),
                 ),
@@ -848,5 +862,79 @@ class _LockNotifications extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+/// The card gives under the finger and springs back as the face leaves for
+/// the PIN.
+class _LockNotificationPress extends StatefulWidget {
+  const _LockNotificationPress({required this.onTap, required this.child});
+
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  State<_LockNotificationPress> createState() => _LockNotificationPressState();
+}
+
+class _LockNotificationPressState extends State<_LockNotificationPress>
+    with SingleTickerProviderStateMixin {
+  static const double _pressedScale = 0.95;
+
+  late final AnimationController _press = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 90),
+    reverseDuration: const Duration(milliseconds: 380),
+  );
+
+  // The release overshoots a little past full size before settling.
+  late final Animation<double> _scale = CurvedAnimation(
+    parent: _press,
+    curve: Curves.easeOut,
+    reverseCurve: Curves.easeInBack,
+  ).drive(Tween<double>(begin: 1.0, end: _pressedScale));
+
+  @override
+  void dispose() {
+    _press.dispose();
+    super.dispose();
+  }
+
+  void _release() => _press.reverse();
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      onTap: widget.onTap,
+      child: RawGestureDetector(
+        behavior: HitTestBehavior.opaque,
+        gestures: {
+          _LiftTapGestureRecognizer:
+              GestureRecognizerFactoryWithHandlers<_LiftTapGestureRecognizer>(
+                _LiftTapGestureRecognizer.new,
+                (recognizer) => recognizer
+                  ..onTapDown = ((_) => _press.forward())
+                  ..onTapCancel = _release
+                  ..onTap = () {
+                    // A quick tap still shows the press before the release.
+                    _press.forward().whenCompleteOrCancel(_release);
+                    widget.onTap();
+                  },
+              ),
+        },
+        child: ScaleTransition(scale: _scale, child: widget.child),
+      ),
+    );
+  }
+}
+
+/// Takes the tap as the finger lifts instead of waiting out the face's
+/// double tap, so the PIN comes up at once.
+class _LiftTapGestureRecognizer extends TapGestureRecognizer {
+  @override
+  void handlePrimaryPointer(PointerEvent event) {
+    super.handlePrimaryPointer(event);
+    if (event is PointerUpEvent) resolve(GestureDisposition.accepted);
   }
 }

@@ -10,6 +10,8 @@ import 'dart:ui' show ImageFilter, TileMode;
 
 import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/gestures.dart'
+    show GestureDisposition, PointerEvent, PointerUpEvent, TapGestureRecognizer;
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -43,6 +45,7 @@ import 'package:denial_flutter_sdk/wallpaper.dart'
         wallpaperDepthDirectory,
         wallpaperDepthProvider;
 
+import '../../state/notification_groups.dart';
 import '../edge_panel_layer.dart';
 import '../mobile_ui_metrics.dart';
 import '../notification_banner.dart';

@@ -212,6 +212,17 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
   /// open or close of the shade was released; zero when nothing was flung.
   /// The shade continues its settle spring from it.
   double get quickSettingsReleaseVelocity => _quickSettingsReleaseVelocity;
+
+  bool _shadeOpensNotifications = false;
+
+  /// Whether the shade opening now asked for its notification page; asking
+  /// clears it.
+  bool takeNotificationPageRequest() {
+    final requested = _shadeOpensNotifications;
+    _shadeOpensNotifications = false;
+    return requested;
+  }
+
   double _gestureReleaseVelocity = 0;
 
   /// Vertical velocity, in logical pixels per second, with which the bottom
@@ -1157,6 +1168,12 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
       edgePanelDrag: Offset.zero,
       edgePanelDragActive: false,
     );
+  }
+
+  /// Opens the shade on its notification page.
+  void openNotificationShade() {
+    _shadeOpensNotifications = true;
+    openQuickSettings();
   }
 
   void closeQuickSettings({double releaseVelocity = 0}) {

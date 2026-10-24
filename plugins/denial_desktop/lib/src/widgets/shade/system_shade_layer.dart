@@ -78,6 +78,13 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
 
   void _onShadeChanged((bool, bool) signal) {
     final (visible, dragActive) = signal;
+    if (visible &&
+        ref
+            .read(referenceShellProvider.notifier)
+            .takeNotificationPageRequest() &&
+        _page != ShadePage.notifications) {
+      setState(() => _page = ShadePage.notifications);
+    }
     if (dragActive) {
       // Live drag: follow the finger exactly.
       _controller.stop();

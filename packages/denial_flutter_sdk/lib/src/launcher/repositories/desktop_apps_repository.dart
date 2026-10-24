@@ -108,6 +108,33 @@ class DesktopAppsRepository {
     return apps;
   }
 
+  /// The application a desktop file ID names, such as a notification's
+  /// `desktop-entry` hint; the `.desktop` suffix is optional.
+  Future<DesktopApp?> loadApplication(String desktopEntry) async {
+    final entry = desktopEntry.trim();
+    if (entry.isEmpty ||
+        entry.contains('/') ||
+        entry.contains(r'\') ||
+        entry == '.' ||
+        entry == '..') {
+      return null;
+    }
+    final id = entry.endsWith('.desktop') ? entry : '$entry.desktop';
+    for (final directory in _paths.desktopApplicationDirs()) {
+      final file = File(p.join(directory.path, id));
+      try {
+        if (await file.exists()) {
+          return await _parseDesktopFile(id, file, <String, String?>{});
+        }
+      } on FileSystemException {
+        // A directory that disappears does not hide the next one.
+      } on FormatException {
+        return null;
+      }
+    }
+    return null;
+  }
+
   Future<DesktopApp?> _parseDesktopFile(
     String id,
     File file,

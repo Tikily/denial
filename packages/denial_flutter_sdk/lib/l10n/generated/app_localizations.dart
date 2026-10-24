@@ -1790,6 +1790,30 @@ abstract class AppLocalizations {
   /// **'Notification'**
   String get notificationGeneric;
 
+  /// Button that folds an expanded notification group back into one card.
+  ///
+  /// In en, this message translates to:
+  /// **'Collapse notifications from {applicationName}'**
+  String notificationGroupCollapse(String applicationName);
+
+  /// Tapping a stacked notification group shows its notifications.
+  ///
+  /// In en, this message translates to:
+  /// **'Show {count} notifications from {applicationName}'**
+  String notificationGroupExpand(int count, String applicationName);
+
+  /// Header of a stacked notification group: app and how many notifications it holds.
+  ///
+  /// In en, this message translates to:
+  /// **'{applicationName} · {count}'**
+  String notificationGroupHeader(String applicationName, int count);
+
+  /// One message of a conversation in a notification.
+  ///
+  /// In en, this message translates to:
+  /// **'{sender}: {text}'**
+  String notificationMessage(String sender, String text);
+
   /// English UI text for notificationNew.
   ///
   /// In en, this message translates to:
@@ -1842,29 +1866,11 @@ abstract class AppLocalizations {
   /// **'Close notification center'**
   String get notificationsCloseCenter;
 
-  /// English UI text for notificationsClosed.
-  ///
-  /// In en, this message translates to:
-  /// **'Closed'**
-  String get notificationsClosed;
-
-  /// English UI text for notificationsClosedByApplication.
-  ///
-  /// In en, this message translates to:
-  /// **'Closed by application'**
-  String get notificationsClosedByApplication;
-
   /// English UI text for notificationsDisableDoNotDisturb.
   ///
   /// In en, this message translates to:
   /// **'Disable do not disturb'**
   String get notificationsDisableDoNotDisturb;
-
-  /// English UI text for notificationsDismissed.
-  ///
-  /// In en, this message translates to:
-  /// **'Dismissed'**
-  String get notificationsDismissed;
 
   /// English UI text for notificationsDoNotDisturbSemantics.
   ///
@@ -1883,12 +1889,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Enable do not disturb'**
   String get notificationsEnableDoNotDisturb;
-
-  /// English UI text for notificationsExpired.
-  ///
-  /// In en, this message translates to:
-  /// **'Expired'**
-  String get notificationsExpired;
 
   /// English UI text for notificationsLoadingPolicy.
   ///
@@ -8931,6 +8931,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Enter PIN'**
   String get lockEnterPin;
+
+  /// Title above the lock screen PIN entry after a notification was tapped; it opens once unlocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter PIN to open {applicationName}'**
+  String lockEnterPinToOpen(String applicationName);
 
   /// Screen reader label for the lock screen PIN dots.
   ///

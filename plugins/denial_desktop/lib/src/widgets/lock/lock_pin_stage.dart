@@ -45,6 +45,10 @@ class _MobileLockPinStageState extends ConsumerState<_MobileLockPinStage>
   );
   late final Animation<Offset> _rise = widget.reveal.drive(_pinStageRise);
 
+  /// The app a tapped notification opens after unlocking; kept while the
+  /// stage fades out.
+  String? _opens;
+
   /// Dots shown filled; stays full while deniald checks a submitted PIN.
   int _filled = 0;
   bool _submitted = false;
@@ -169,6 +173,22 @@ class _MobileLockPinStageState extends ConsumerState<_MobileLockPinStage>
       }
     });
     final l10n = context.l10n;
+    if (widget.interactive) {
+      final groupKey = ref.watch(lockNotificationOpenProvider);
+      final opening = groupKey == null
+          ? null
+          : ref.watch(
+              desktopNotificationsProvider.select(
+                (state) => state.groups
+                    .where((group) => group.key == groupKey)
+                    .firstOrNull
+                    ?.newest
+                    .notification,
+              ),
+            );
+      _opens = opening == null ? null : notificationAppName(opening, l10n);
+    }
+    final opens = _opens;
     final cooldownSeconds = (authentication.cooldown.inMilliseconds / 1000)
         .ceil()
         .clamp(1, 30);
@@ -193,7 +213,7 @@ class _MobileLockPinStageState extends ConsumerState<_MobileLockPinStage>
       focusNode: _keys,
       onKeyEvent: _handleKey,
       icon: Icons.lock_rounded,
-      title: l10n.lockEnterPin,
+      title: opens == null ? l10n.lockEnterPin : l10n.lockEnterPinToOpen(opens),
       shakeOffset: _shakeOffset,
       length: authentication.pinLength.clamp(1, 12),
       filled: _filled,

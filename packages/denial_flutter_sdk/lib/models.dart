@@ -47,6 +47,7 @@ export 'src/models/desktop_notification.dart'
         DesktopNotificationEvent,
         DesktopNotificationEventKind,
         DesktopNotificationImageData,
+        DesktopNotificationMessage,
         DesktopNotificationUrgency;
 export 'src/models/display_layout.dart'
     show DisplayLayout, DisplayOutput, SystemBarSide;
