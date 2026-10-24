@@ -72,6 +72,10 @@ boundaries may change before 1.0.
 
 ### Fixed
 
+- Logging in to Denial from LightDM no longer drops back to the greeter with
+  "libseat did not activate the current TTY session". Display managers that
+  start the session before logind activates it are now waited for, also with
+  libseat 0.8 (#185).
 - KMS-only compositor builds now keep shared hotplug and Wayland behavior
   available without the Flutter shell, and scheduler setup supports musl's
   extended `sched_param` layout.

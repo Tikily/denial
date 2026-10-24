@@ -69,6 +69,46 @@ fn await_presentable_outputs(
     }
 }
 
+/// LightDM starts the session command before it asks logind to activate the
+/// session, so the first activation typically arrives a few hundred
+/// milliseconds after deniald opens its seat.
+const SEAT_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Waits for logind to activate a session that the display manager started
+/// before activating it. The caller must already hold its DRM device: libseat
+/// 0.8 learns of the activation only through that device's `ResumeDevice`.
+fn wait_for_seat_activation(
+    session: &LibSeatSession,
+    notifier: LibSeatSessionNotifier,
+) -> Result<LibSeatSessionNotifier, Box<dyn Error>> {
+    if session.is_active() {
+        return Ok(notifier);
+    }
+    info!("waiting for logind to activate the session");
+    let started = Instant::now();
+    let mut event_loop = EventLoop::<bool>::try_new()?;
+    let dispatcher = Dispatcher::new(notifier, |event, _, active: &mut bool| {
+        *active = matches!(event, SessionEvent::ActivateSession);
+    });
+    let token = event_loop
+        .handle()
+        .register_dispatcher(dispatcher.clone())?;
+    let mut active = false;
+    while !active {
+        let remaining = SEAT_ACTIVATION_TIMEOUT
+            .checked_sub(started.elapsed())
+            .ok_or("logind did not activate the session")?;
+        event_loop.dispatch(remaining, &mut active)?;
+    }
+    event_loop.handle().remove(token);
+    drop(event_loop);
+    info!(
+        waited_ms = started.elapsed().as_millis(),
+        "logind activated the session"
+    );
+    Ok(dispatcher.into_source_inner())
+}
+
 /// Card and render-node aliases share one physical sysfs device. Paths and
 /// DRM minor numbers identify nodes, not GPU ownership.
 fn physical_drm_identity(path: &Path) -> Result<std::path::PathBuf, Box<dyn Error>> {
@@ -145,9 +185,13 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
     };
 
     let (mut session, session_notifier) = LibSeatSession::new()?;
-    if !session.is_active() {
-        return Err("libseat did not activate the current TTY session".into());
-    }
+    // logind hands out the device of an inactive session and grants DRM
+    // master when it activates the session.
+    let owned_fd = session.open(
+        Path::new(&options.device),
+        OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
+    )?;
+    let session_notifier = wait_for_seat_activation(&session, session_notifier)?;
     // RTKit grants priority only to active local sessions. Prepare the policy
     // after libseat activation, but keep this thread ordinary until Flutter,
     // graphics drivers, and persistent compositor workers have initialized.
@@ -155,10 +199,8 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
     let seat_name = session.seat();
     let drm_device_id = std::fs::metadata(&options.device)?.rdev();
 
-    let owned_fd = session.open(
-        Path::new(&options.device),
-        OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
-    )?;
+    // Only after activation: DrmDeviceFd decides once, here, whether it holds
+    // DRM master and so must drop and reacquire it across VT switches.
     let drm_fd = DrmDeviceFd::new(DeviceFd::from(owned_fd));
     let render_device = options.render_device.as_deref().unwrap_or(&options.device);
     let render_fd = if render_device == options.device {

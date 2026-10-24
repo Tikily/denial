@@ -203,13 +203,13 @@ use smithay::backend::egl::EGLDisplay;
 use smithay::backend::input::AxisSource;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::{Bind, Color32F, Frame, Renderer};
-use smithay::backend::session::libseat::LibSeatSession;
+use smithay::backend::session::libseat::{LibSeatSession, LibSeatSessionNotifier};
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{UdevBackend, UdevEvent};
 use smithay::output::Mode as OutputMode;
 #[cfg(feature = "flutter")]
 use smithay::reexports::calloop::channel::Sender;
-use smithay::reexports::calloop::{EventLoop, RegistrationToken};
+use smithay::reexports::calloop::{Dispatcher, EventLoop, RegistrationToken};
 #[cfg(feature = "flutter")]
 use smithay::reexports::calloop::{Interest, Mode as PollMode, PostAction, generic::Generic};
 use smithay::reexports::drm::buffer::{
