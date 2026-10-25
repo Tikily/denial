@@ -1254,6 +1254,10 @@ impl FlutterLauncher {
         self.ui_development.plugin_rebuild_needed()
     }
 
+    pub(super) fn ui_development_deadline(&self, now: Instant) -> Option<Instant> {
+        self.ui_development.plugin_health_deadline(now)
+    }
+
     pub(super) fn new(
         configuration: FlutterLaunchConfiguration<'_>,
         events: Sender<flutter_runtime::RuntimeEvent>,

@@ -23,6 +23,10 @@ const MAX_WORKSPACE_BYTES: usize = 4096;
 const MAX_DIAGNOSTICS: usize = 64;
 const MAX_CONFIG_BYTES: usize = 64 * 1024;
 const CONFIG_SCHEMA_VERSION: u32 = 1;
+/// A compiled plugin that draws a frame and keeps running this long is kept.
+const PLUGIN_CONFIRM_DELAY: Duration = Duration::from_secs(3);
+/// A compiled plugin without a first frame by then is replaced.
+const PLUGIN_START_TIMEOUT: Duration = Duration::from_secs(20);
 static CONFIG_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -747,12 +751,22 @@ impl UiDevelopmentController {
         self.release_bundle.is_some()
     }
 
+    /// When `poll_plugin_health` next has something to decide: the plugin
+    /// confirms after 3 s with a frame, and fails after 20 s without one.
+    pub(super) fn plugin_health_deadline(&self, now: Instant) -> Option<Instant> {
+        let started = self.plugin_start?;
+        [PLUGIN_CONFIRM_DELAY, PLUGIN_START_TIMEOUT]
+            .into_iter()
+            .map(|delay| started + delay)
+            .find(|deadline| *deadline > now)
+    }
+
     pub(super) fn poll_plugin_health(
         &mut self,
         produced_frame: bool,
     ) -> Option<UiDevelopmentEffect> {
         let started = self.plugin_start?;
-        if produced_frame && started.elapsed() >= Duration::from_secs(3) {
+        if produced_frame && started.elapsed() >= PLUGIN_CONFIRM_DELAY {
             match self.plugins.confirm() {
                 Ok(()) => {
                     self.plugin_start = None;
@@ -772,7 +786,7 @@ impl UiDevelopmentController {
                 }
             }
         }
-        if started.elapsed() >= Duration::from_secs(20) {
+        if started.elapsed() >= PLUGIN_START_TIMEOUT {
             self.runtime_failed(
                 UiRuntimeMode::CustomOptimized,
                 &"No initial frame arrived within 20 seconds",

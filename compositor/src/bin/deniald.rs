@@ -76,6 +76,8 @@ mod lifecycle;
 #[cfg(feature = "flutter")]
 #[path = "deniald/local_windows.rs"]
 mod local_windows;
+#[path = "deniald/loop_wake.rs"]
+mod loop_wake;
 #[path = "deniald/native_shortcut.rs"]
 mod native_shortcut;
 #[cfg(feature = "flutter")]
@@ -141,6 +143,9 @@ mod touchpad_gestures;
 #[cfg(feature = "flutter")]
 #[path = "deniald/ui_development.rs"]
 mod ui_development;
+#[cfg(feature = "flutter")]
+#[path = "deniald/wakeup.rs"]
+mod wakeup;
 #[path = "deniald/wayland_frontend.rs"]
 mod wayland_frontend;
 #[path = "deniald/welcome.rs"]

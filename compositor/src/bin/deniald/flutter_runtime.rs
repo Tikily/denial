@@ -150,7 +150,6 @@ const MAX_RETAINED_WINDOW_CLOSE_LEASES: usize = 4096;
 const MAX_PLATFORM_TASKS_PER_DISPATCH: usize = 256;
 const INITIAL_PLATFORM_TASK_BATCH_CAPACITY: usize = 64;
 const MAX_LIVE_EXTERNAL_TEXTURE_RESOURCES: usize = 1024;
-const PLATFORM_TASK_MAX_DISPATCH_TIMEOUT: Duration = Duration::from_millis(100);
 const MAX_PENDING_AUDIO_REQUESTS: usize = 128;
 const MAX_PENDING_BRIGHTNESS_REQUESTS: usize = 128;
 const MAX_PENDING_SOFTWARE_DIMMING_REQUESTS: usize = 128;
@@ -286,12 +285,13 @@ impl Ord for QueuedPlatformTask {
     }
 }
 
-fn platform_task_dispatch_timeout(tasks: &BinaryHeap<QueuedPlatformTask>, now: u64) -> Duration {
+fn platform_task_dispatch_timeout(
+    tasks: &BinaryHeap<QueuedPlatformTask>,
+    now: u64,
+) -> Option<Duration> {
     tasks
         .peek()
         .map(|queued| Duration::from_nanos(queued.task.target_time_nanos.saturating_sub(now)))
-        .unwrap_or(PLATFORM_TASK_MAX_DISPATCH_TIMEOUT)
-        .min(PLATFORM_TASK_MAX_DISPATCH_TIMEOUT)
 }
 
 fn take_next_due_platform_task(
@@ -341,6 +341,13 @@ struct WindowCloseTextureLeases {
 impl WindowCloseTextureLeases {
     fn is_empty(&self) -> bool {
         self.closing_windows.is_empty()
+    }
+
+    fn next_expiry(&self) -> Option<Instant> {
+        self.closing_windows
+            .values()
+            .map(|lease| lease.expires_at)
+            .min()
     }
 
     fn publish(

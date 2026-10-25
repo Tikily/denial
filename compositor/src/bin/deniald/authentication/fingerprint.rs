@@ -372,7 +372,8 @@ fn complete_match(shared: &SharedAuthentication, epoch: u64) -> bool {
     shared
         .fingerprint_unlock_pending
         .store(true, Ordering::Release);
-    shared.condition.notify_all();
+    shared.notify();
+    crate::loop_wake::wake();
     true
 }
 
@@ -422,7 +423,7 @@ pub(super) fn advance_pending_unlock(
         state: snapshot_locked(shared, &state, Instant::now()),
         message: "Fingerprint recognized".into(),
     });
-    shared.condition.notify_all();
+    shared.notify();
     info!("Denial unlocked through fingerprint authentication");
     false
 }

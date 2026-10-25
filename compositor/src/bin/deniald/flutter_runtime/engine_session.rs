@@ -580,12 +580,27 @@ impl FlutterRuntime {
         Ok(())
     }
 
-    pub fn next_dispatch_timeout(&self) -> Duration {
-        if self.scheduled_tasks.is_empty() {
-            return PLATFORM_TASK_MAX_DISPATCH_TIMEOUT;
-        }
-        let now = self.host().engine().current_time_nanos();
-        platform_task_dispatch_timeout(&self.scheduled_tasks, now)
+    /// How long the loop may sleep before the runtime has timed work: the
+    /// next platform task, or a close-frame lease or texture retirement that
+    /// runs out. New tasks wake the loop through `PlatformTasksReady`.
+    pub fn next_dispatch_timeout(&self, now: Instant) -> Duration {
+        let task = if self.scheduled_tasks.is_empty() {
+            None
+        } else {
+            let engine_now = self.host().engine().current_time_nanos();
+            platform_task_dispatch_timeout(&self.scheduled_tasks, engine_now)
+        };
+        let expiry = self
+            .window_close_texture_leases
+            .next_expiry()
+            .into_iter()
+            .chain(self.retiring_native_textures.values().copied())
+            .min()
+            .map(|deadline| deadline.saturating_duration_since(now));
+        task.into_iter()
+            .chain(expiry)
+            .min()
+            .unwrap_or(Duration::MAX)
     }
 
     pub fn take_ready_frame(

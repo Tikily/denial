@@ -869,10 +869,17 @@ struct SharedAuthentication {
     fingerprint_unlock_pending: AtomicBool,
     state: Mutex<AuthenticationState>,
     condition: Condvar,
+    /// Wakes the logind worker when the lock state changes or it must stop.
+    changed: crate::wakeup::Wakeup,
     events: Mutex<VecDeque<AuthenticationEvent>>,
 }
 
 impl SharedAuthentication {
+    fn notify(&self) {
+        self.condition.notify_all();
+        self.changed.wake();
+    }
+
     fn push_event(&self, event: AuthenticationEvent) {
         let mut events = lock_unpoisoned(&self.events);
         if events.len() == MAX_PENDING_EVENTS {
@@ -880,6 +887,8 @@ impl SharedAuthentication {
         }
         events.push_back(event);
         self.events_pending.store(true, Ordering::Release);
+        drop(events);
+        crate::loop_wake::wake();
     }
 }
 
@@ -946,6 +955,7 @@ impl AuthenticationController {
             security_gate_locked: AtomicBool::new(start_locked),
             events_pending: AtomicBool::new(false),
             fingerprint_unlock_pending: AtomicBool::new(false),
+            changed: crate::wakeup::Wakeup::new()?,
             state: Mutex::new(AuthenticationState {
                 stopping: false,
                 busy: false,
@@ -1048,6 +1058,7 @@ impl AuthenticationController {
                 .security_gate_locked
                 .store(true, Ordering::Release);
         }
+        self.shared.changed.wake();
     }
 
     pub(super) fn handle_packet(&self, packet: &[u8]) -> Result<(), AuthenticationDecodeError> {
@@ -1083,7 +1094,7 @@ impl AuthenticationController {
         }
         state.fingerprint_offered = offered;
         drop(state);
-        self.shared.condition.notify_all();
+        self.shared.notify();
     }
 
     /// Turns fingerprint unlock on or off; the lock screen learns at once
@@ -1099,7 +1110,7 @@ impl AuthenticationController {
                 .push_event(credential_event(&self.shared, &state));
         }
         drop(state);
-        self.shared.condition.notify_all();
+        self.shared.notify();
     }
 
     /// Explicit locks remain unconditional. Only compositor-owned automatic
@@ -1119,7 +1130,7 @@ impl AuthenticationController {
         }
         apply_lock(&self.shared, &mut state);
         drop(state);
-        self.shared.condition.notify_all();
+        self.shared.notify();
         self.publish_state();
         true
     }
@@ -1205,7 +1216,7 @@ impl AuthenticationController {
             self.publish_state();
             return;
         }
-        self.shared.condition.notify_all();
+        self.shared.notify();
         self.publish_state();
     }
 
@@ -1226,7 +1237,7 @@ impl AuthenticationController {
             }
             state.response = Some(response);
         }
-        self.shared.condition.notify_all();
+        self.shared.notify();
         true
     }
 
@@ -1241,7 +1252,7 @@ impl AuthenticationController {
             state.response = None;
             state.prompt = None;
         }
-        self.shared.condition.notify_all();
+        self.shared.notify();
         self.publish_state();
     }
 
@@ -1265,7 +1276,7 @@ impl Drop for AuthenticationController {
             state.response = None;
             state.prompt = None;
         }
-        self.shared.condition.notify_all();
+        self.shared.notify();
         for worker in [&self.session_worker, &self.capability_worker] {
             if lock_unpoisoned(worker)
                 .take()
@@ -1314,7 +1325,7 @@ fn apply_lock(shared: &SharedAuthentication, state: &mut AuthenticationState) {
 fn lock_session(shared: &SharedAuthentication) {
     let mut state = lock_unpoisoned(&shared.state);
     apply_lock(shared, &mut state);
-    shared.condition.notify_all();
+    shared.notify();
     shared.push_event(AuthenticationEvent {
         kind: AuthenticationEventKind::State,
         state: snapshot_locked(shared, &state, Instant::now()),
@@ -1419,7 +1430,7 @@ fn run_authentication_worker(
             let message = if success {
                 shared.locked.store(false, Ordering::Release);
                 state.lock_epoch = state.lock_epoch.wrapping_add(1);
-                shared.condition.notify_all();
+                shared.notify();
                 state.failure_count = 0;
                 state.cooldown_until = None;
                 "Authentication successful".into()

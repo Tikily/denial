@@ -8,11 +8,17 @@ use zbus::zvariant::OwnedObjectPath;
 const SERVICE: &str = "org.freedesktop.login1";
 const MANAGER: &str = "/org/freedesktop/login1";
 const SESSION_INTERFACE: &str = "org.freedesktop.login1.Session";
-const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
 fn stopping(shared: &SharedAuthentication) -> bool {
     lock_unpoisoned(&shared.state).stopping
+}
+
+/// Returns once the controller stops.
+async fn stopped(shared: &SharedAuthentication) {
+    while !stopping(shared) {
+        shared.changed.wait().await;
+    }
 }
 
 pub(super) fn run_worker(shared: &Arc<SharedAuthentication>) {
@@ -31,10 +37,10 @@ pub(super) fn run_worker(shared: &Arc<SharedAuthentication>) {
             {
                 warn!(%error, "logind session lock monitoring is unavailable; retrying");
             }
-            let retry = Instant::now() + RETRY_INTERVAL;
-            while !stopping(shared) && Instant::now() < retry {
-                async_io::Timer::after(POLL_INTERVAL).await;
-            }
+            future::race(stopped(shared), async {
+                async_io::Timer::after(RETRY_INTERVAL).await;
+            })
+            .await;
         }
     });
 }
@@ -84,13 +90,24 @@ async fn monitor(connection: &zbus::Connection, shared: &SharedAuthentication) -
                 }
             }
         }
+        // Sleep until logind speaks, the lock state changes or the worker
+        // stops, or until a failed hint is due again.
+        let retry = (published_hint != Some(locked)).then_some(hint_retry);
         let signal = future::race(
             future::race(async { Some(locks.next().await) }, async {
                 owners.next().await;
                 Some(None)
             }),
             async {
-                async_io::Timer::after(POLL_INTERVAL).await;
+                match retry {
+                    Some(at) => {
+                        future::race(shared.changed.wait(), async {
+                            async_io::Timer::at(at).await;
+                        })
+                        .await;
+                    }
+                    None => shared.changed.wait().await,
+                }
                 None
             },
         )
@@ -213,6 +230,7 @@ mod tests {
         controller.acknowledge_unlocked_boundary();
         assert!(!received.recv_timeout(Duration::from_secs(3)).unwrap());
         lock_unpoisoned(&controller.shared.state).stopping = true;
+        controller.shared.notify();
         worker.join().unwrap();
     }
 }

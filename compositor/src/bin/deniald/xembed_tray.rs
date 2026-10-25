@@ -254,6 +254,7 @@ impl XEmbedEventSender {
         if sent {
             self.pending.store(true, Ordering::Release);
         }
+        crate::loop_wake::wake();
         sent
     }
 }

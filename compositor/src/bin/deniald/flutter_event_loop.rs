@@ -13,44 +13,63 @@ use smithay::reexports::calloop::ping::make_ping;
 const BACKGROUND_SERVICE_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 30);
 const BACKGROUND_MAINTENANCE_INTERVAL: Duration = Duration::from_millis(100);
 
-struct OperationCadence {
-    next_service: Instant,
-    next_maintenance: Instant,
+/// Runs a background check after the loop wakes, at most once per interval.
+///
+/// The loop has no periodic tick: it wakes for its sources, for deadlines it
+/// knows of, and for workers through `loop_wake`. Every wake may have queued
+/// work for the check, so a wake that comes too soon after the last run owes
+/// one more run when the interval ends.
+struct Cadence {
+    interval: Duration,
+    next: Option<Instant>,
+    owed: bool,
 }
 
-impl OperationCadence {
-    fn new(now: Instant) -> Self {
+impl Cadence {
+    const fn new(interval: Duration) -> Self {
         Self {
-            next_service: now,
-            next_maintenance: now,
+            interval,
+            next: None,
+            owed: false,
         }
     }
 
-    fn take_service_due(&mut self, now: Instant) -> bool {
-        take_periodic_deadline(now, &mut self.next_service, BACKGROUND_SERVICE_INTERVAL)
-    }
-
-    fn take_maintenance_due(&mut self, now: Instant) -> bool {
-        take_periodic_deadline(
-            now,
-            &mut self.next_maintenance,
-            BACKGROUND_MAINTENANCE_INTERVAL,
-        )
+    /// Notes a loop iteration and says whether the check runs in it.
+    fn turn(&mut self, now: Instant, forced: bool) -> bool {
+        let due = forced || self.next.is_none_or(|next| now >= next);
+        if due {
+            self.next = now.checked_add(self.interval);
+        }
+        self.owed = !due;
+        due
     }
 
     fn limit_dispatch_timeout(&self, now: Instant, timeout: Duration) -> Duration {
-        timeout
-            .min(self.next_service.saturating_duration_since(now))
-            .min(self.next_maintenance.saturating_duration_since(now))
+        match self.next {
+            Some(next) if self.owed => timeout.min(next.saturating_duration_since(now)),
+            _ => timeout,
+        }
     }
 }
 
-fn take_periodic_deadline(now: Instant, deadline: &mut Instant, interval: Duration) -> bool {
-    if now < *deadline {
-        return false;
+/// Shell services, and the idle and DPMS evaluation.
+struct BackgroundCadences {
+    services: Cadence,
+    maintenance: Cadence,
+}
+
+impl BackgroundCadences {
+    const fn new() -> Self {
+        Self {
+            services: Cadence::new(BACKGROUND_SERVICE_INTERVAL),
+            maintenance: Cadence::new(BACKGROUND_MAINTENANCE_INTERVAL),
+        }
     }
-    *deadline = now.checked_add(interval).unwrap_or(now);
-    true
+
+    fn limit_dispatch_timeout(&self, now: Instant, timeout: Duration) -> Duration {
+        let timeout = self.services.limit_dispatch_timeout(now, timeout);
+        self.maintenance.limit_dispatch_timeout(now, timeout)
+    }
 }
 
 fn interactive_service_work_pending(events: &RuntimeState) -> bool {
@@ -537,17 +556,32 @@ fn next_dispatch_timeout(
     now: Instant,
     runtime: &flutter_runtime::FlutterRuntime,
     frame_scheduler: &frame_scheduler::FrameScheduler,
-    operation_cadence: &OperationCadence,
+    background: &BackgroundCadences,
     events: &RuntimeState,
     drm: &DrmDevice,
     scheduler: &output_scheduler::OutputScheduler,
     deadline: Option<Instant>,
 ) -> Option<Duration> {
-    let mut timeout = frame_scheduler.limit_dispatch_timeout(now, runtime.next_dispatch_timeout());
-    timeout = operation_cadence.limit_dispatch_timeout(now, timeout);
+    let mut timeout =
+        frame_scheduler.limit_dispatch_timeout(now, runtime.next_dispatch_timeout(now));
+    timeout = background.limit_dispatch_timeout(now, timeout);
     timeout = events.idle_policy.limit_dispatch_timeout(now, timeout);
     timeout = events.dpms_topology.limit_dispatch_timeout(now, timeout);
-    if events.fingerprint.active() {
+    if let Some(expiry) = events
+        .pending_system_control_waits
+        .iter()
+        .map(PendingSystemControlWait::expires_at)
+        .min()
+    {
+        timeout = timeout.min(expiry.saturating_duration_since(now));
+    }
+    // A fingerprint unlock settles on a short delay after the display wakes.
+    if events.fingerprint.active()
+        || events
+            .authentication
+            .as_ref()
+            .is_some_and(|authentication| authentication.fingerprint_unlock_pending())
+    {
         timeout = timeout.min(Duration::from_millis(20));
     }
     if drm.is_active() {
@@ -2634,6 +2668,12 @@ pub(super) fn run_flutter_event_loop(
         .handle()
         .insert_source(volition_wake_source, |(), _, _: &mut RuntimeState| {})?;
     let volition_events = output_scheduler::VolitionEvents::new(volition_wake);
+    let (loop_wake, loop_wake_source) = make_ping()?;
+    // Workers publish shared state and then ping; the next iteration reads it.
+    event_loop
+        .handle()
+        .insert_source(loop_wake_source, |(), _, _: &mut RuntimeState| {})?;
+    crate::loop_wake::install(loop_wake);
     let (lid_readings, lid_reading_source) = channel();
     event_loop.handle().insert_source(
         lid_reading_source,
@@ -2677,7 +2717,7 @@ pub(super) fn run_flutter_event_loop(
     let mut active_output_confirmation: Option<ActiveOutputConfirmation> = None;
     let mut pending_sensor_rotation = output_configuration.sensor_rotation;
     let mut outputs_disconnected = false;
-    let mut operation_cadence = OperationCadence::new(Instant::now());
+    let mut background = BackgroundCadences::new();
     let mut ui_floor = cpu_scheduling::UiFloor::new(Instant::now());
     let mut gamma_topology = None;
 
@@ -2711,14 +2751,17 @@ pub(super) fn run_flutter_event_loop(
             .flutter_events
             .iter()
             .any(flutter_runtime::RuntimeEvent::queues_background_service_work);
-        let background_services_due = operation_cadence.take_service_due(iteration_now)
-            || flutter_background_event
-            || interactive_service_work_pending(&events);
-        let background_maintenance_due = operation_cadence.take_maintenance_due(iteration_now)
-            || events
+        let background_services_due = background.services.turn(
+            iteration_now,
+            flutter_background_event || interactive_service_work_pending(&events),
+        );
+        let background_maintenance_due = background.maintenance.turn(
+            iteration_now,
+            events
                 .idle_policy
                 .next_deadline()
-                .is_some_and(|deadline| iteration_now >= deadline);
+                .is_some_and(|deadline| iteration_now >= deadline),
+        );
         if let Some(frontend) = events.wayland.as_mut() {
             frontend.settings.current_sensor_rotation = output_configuration.sensor_rotation;
         }
@@ -3145,7 +3188,7 @@ pub(super) fn run_flutter_event_loop(
             now,
             runtime,
             &frame_scheduler,
-            &operation_cadence,
+            &background,
             &events,
             drm,
             &scheduler,
@@ -3153,7 +3196,17 @@ pub(super) fn run_flutter_event_loop(
         ) else {
             break;
         };
-        let dispatch_timeout = ui_floor.limit_dispatch_timeout(now, dispatch_timeout);
+        let mut dispatch_timeout = ui_floor.limit_dispatch_timeout(now, dispatch_timeout);
+        // An unconfirmed output configuration rolls back at its deadline even
+        // if nothing else happens.
+        for deadline in active_output_confirmation
+            .as_ref()
+            .map(|confirmation| confirmation.deadline)
+            .into_iter()
+            .chain(flutter_launcher.ui_development_deadline(now))
+        {
+            dispatch_timeout = dispatch_timeout.min(deadline.saturating_duration_since(now));
+        }
         event_loop.dispatch(dispatch_timeout, &mut events)?;
         frame_scheduler.resume_ticks(Instant::now());
     }

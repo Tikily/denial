@@ -17,7 +17,7 @@ use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt}
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, RwLock, mpsc};
+use std::sync::{Arc, Mutex, RwLock, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -45,7 +45,6 @@ const EVENT_QUEUE_CAPACITY: usize = 8;
 const MAX_CLIENT_WORKERS: usize = 32;
 const MAX_REQUEST_BYTES: usize = 256 * 1024;
 const CLIENT_IO_TIMEOUT: Duration = Duration::from_secs(3);
-const SUBSCRIBER_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const APPLY_TIMEOUT: Duration = Duration::from_secs(15);
 const SHELL_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 const SETTINGS_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
@@ -174,82 +173,76 @@ struct SettingsDocumentSnapshot {
     document: String,
 }
 
+/// The shared settings document, and a wake pipe per streaming subscriber.
 #[derive(Clone)]
 struct SettingsDocumentPublisher {
-    state: Arc<(Mutex<SettingsDocumentSnapshot>, Condvar)>,
+    state: Arc<Mutex<SettingsDocumentState>>,
 }
 
-enum SettingsDocumentWait {
-    Changed(SettingsDocumentSnapshot),
-    TimedOut,
-    Stopped,
+struct SettingsDocumentState {
+    snapshot: SettingsDocumentSnapshot,
+    subscribers: Vec<UnixStream>,
 }
 
 impl SettingsDocumentPublisher {
     fn new(revision: u64, document: String) -> Self {
         Self {
-            state: Arc::new((
-                Mutex::new(SettingsDocumentSnapshot { revision, document }),
-                Condvar::new(),
-            )),
+            state: Arc::new(Mutex::new(SettingsDocumentState {
+                snapshot: SettingsDocumentSnapshot { revision, document },
+                subscribers: Vec::new(),
+            })),
         }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, SettingsDocumentState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn snapshot(&self) -> SettingsDocumentSnapshot {
-        self.state
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+        self.lock().snapshot.clone()
     }
 
     fn revision(&self) -> u64 {
-        self.state
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .revision
+        self.lock().snapshot.revision
+    }
+
+    /// A pipe that turns readable after each publication and at shutdown.
+    /// It closes the subscription when dropped.
+    fn subscribe(&self) -> io::Result<UnixStream> {
+        let (sender, receiver) = UnixStream::pair()?;
+        sender.set_nonblocking(true)?;
+        receiver.set_nonblocking(true)?;
+        let mut state = self.lock();
+        // A spare wake costs the others one snapshot check, and it drops the
+        // pipes of subscribers that left since the last publication.
+        wake_subscribers(&mut state.subscribers);
+        state.subscribers.push(sender);
+        Ok(receiver)
     }
 
     fn publish(&self, revision: u64, document: String) -> bool {
-        let (state, changed) = &*self.state;
-        let mut snapshot = state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if revision <= snapshot.revision {
+        let mut state = self.lock();
+        if revision <= state.snapshot.revision {
             return false;
         }
-        *snapshot = SettingsDocumentSnapshot { revision, document };
-        changed.notify_all();
+        state.snapshot = SettingsDocumentSnapshot { revision, document };
+        wake_subscribers(&mut state.subscribers);
         true
     }
 
-    fn wait_for_change(&self, revision: u64, stopping: &AtomicBool) -> SettingsDocumentWait {
-        let (state, changed) = &*self.state;
-        let snapshot = state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if snapshot.revision > revision {
-            return SettingsDocumentWait::Changed(snapshot.clone());
-        }
-        if stopping.load(Ordering::Acquire) {
-            return SettingsDocumentWait::Stopped;
-        }
-        let (snapshot, _) = changed
-            .wait_timeout(snapshot, SUBSCRIBER_HEALTH_POLL_INTERVAL)
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if stopping.load(Ordering::Acquire) {
-            SettingsDocumentWait::Stopped
-        } else if snapshot.revision > revision {
-            SettingsDocumentWait::Changed(snapshot.clone())
-        } else {
-            SettingsDocumentWait::TimedOut
-        }
-    }
-
     fn wake_all(&self) {
-        self.state.1.notify_all();
+        wake_subscribers(&mut self.lock().subscribers);
     }
+}
+
+/// A full pipe already holds a wake; a closed one lost its subscriber.
+fn wake_subscribers(subscribers: &mut Vec<UnixStream>) {
+    subscribers.retain(|mut subscriber| match subscriber.write(&[1]) {
+        Ok(_) => true,
+        Err(error) => error.kind() == io::ErrorKind::WouldBlock,
+    });
 }
 
 struct ActiveControlClient {
@@ -716,6 +709,10 @@ impl PendingSystemControlWait {
 
     pub(super) fn expired(&self, now: Instant) -> bool {
         self.expires_at <= now
+    }
+
+    pub(super) const fn expires_at(&self) -> Instant {
+        self.expires_at
     }
 }
 
@@ -2079,54 +2076,62 @@ fn stream_settings_documents(
     publisher: &OutputControlPublisher,
     stopping: &AtomicBool,
 ) -> io::Result<()> {
+    // Subscribe before the first snapshot so no publication falls between.
+    let mut wake = publisher.settings_documents.subscribe()?;
     let initial = publisher.settings_documents.snapshot();
     write_response(stream, &success_response(request_id, &initial))?;
     let mut revision = initial.revision;
     loop {
-        if peer_disconnected(stream)? {
-            return Ok(());
+        let snapshot = publisher.settings_documents.snapshot();
+        if snapshot.revision > revision {
+            write_response(stream, &success_response(request_id, &snapshot))?;
+            revision = snapshot.revision;
         }
-        match publisher
-            .settings_documents
-            .wait_for_change(revision, stopping)
-        {
-            SettingsDocumentWait::Changed(snapshot) => {
-                write_response(stream, &success_response(request_id, &snapshot))?;
-                revision = snapshot.revision;
-            }
-            SettingsDocumentWait::TimedOut => {}
-            SettingsDocumentWait::Stopped => return Ok(()),
+        if stopping.load(Ordering::Acquire) || !wait_for_publication(stream, &mut wake)? {
+            return Ok(());
         }
     }
 }
 
-fn peer_disconnected(stream: &UnixStream) -> io::Result<bool> {
-    let mut byte = [0_u8; 1];
+/// Sleeps until the next publication or shutdown wake. False once the client
+/// has hung up; anything it sends while subscribed is ignored.
+fn wait_for_publication(stream: &UnixStream, wake: &mut UnixStream) -> io::Result<bool> {
+    let mut poll_fds = [
+        libc::pollfd {
+            fd: stream.as_raw_fd(),
+            events: libc::POLLRDHUP,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: wake.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
     loop {
-        // SAFETY: `byte` is valid writable storage for one byte and `stream`
-        // owns a live Unix socket for the duration of this nonblocking peek.
-        let read = unsafe {
-            libc::recv(
-                stream.as_raw_fd(),
-                byte.as_mut_ptr().cast(),
-                byte.len(),
-                libc::MSG_DONTWAIT | libc::MSG_PEEK,
-            )
-        };
-        if read > 0 {
-            return Ok(false);
-        }
-        if read == 0 {
-            return Ok(true);
+        // SAFETY: `poll_fds` points to two initialized pollfd values whose
+        // client stream and wake pipe outlive this call.
+        let ready =
+            unsafe { libc::poll(poll_fds.as_mut_ptr(), poll_fds.len() as libc::nfds_t, -1) };
+        if ready >= 0 {
+            break;
         }
         let error = io::Error::last_os_error();
-        match error.kind() {
-            io::ErrorKind::WouldBlock => return Ok(false),
-            io::ErrorKind::Interrupted => {}
-            io::ErrorKind::BrokenPipe
-            | io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::ConnectionReset => return Ok(true),
-            _ => return Err(error),
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+    if poll_fds[0].revents != 0 {
+        return Ok(false);
+    }
+    let mut drained = [0_u8; 64];
+    loop {
+        match wake.read(&mut drained) {
+            Ok(0) => return Ok(false),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
         }
     }
 }

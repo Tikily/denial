@@ -5,11 +5,12 @@ use std::fmt;
 use std::io;
 use std::mem::MaybeUninit;
 use std::num::NonZeroU64;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -30,6 +31,7 @@ const MAX_ARGUMENTS: usize = 64;
 const MAX_ARGUMENT_SIZE: usize = 4096;
 const MAX_TRACKED_APPLICATIONS: usize = 64;
 const MAX_PENDING_APPLICATION_LAUNCHES: usize = 64;
+/// How often the reaper checks a child it could not open a pidfd for.
 const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LAUNCH_APPLICATION: u8 = 0;
 const LAUNCH_DESKTOP_APPLICATION: u8 = 1;
@@ -688,8 +690,9 @@ fn launch_application(
         child,
         _permit: permit,
         reaped: false,
+        exited: None,
     };
-    match reaper.sender.send(tracked) {
+    match reaper.send(tracked) {
         Ok(()) => return Ok(pid),
         Err(error) => {
             invalidate_reaper_sender(reaper.generation);
@@ -701,7 +704,7 @@ fn launch_application(
     // already-running child instead of turning a recoverable monitor failure
     // into an application launch failure.
     match reaper_sender() {
-        Ok(replacement) => match replacement.sender.send(tracked) {
+        Ok(replacement) => match replacement.send(tracked) {
             Ok(()) => {
                 warn!(pid, "restarted child reaper after an unexpected disconnect");
                 return Ok(pid);
@@ -862,6 +865,8 @@ struct TrackedChild {
     child: Child,
     _permit: LaunchPermit<'static>,
     reaped: bool,
+    /// Readable once the child exits; the reaper opens it on arrival.
+    exited: Option<OwnedFd>,
 }
 
 struct ReaperChildren(Vec<TrackedChild>);
@@ -890,6 +895,25 @@ impl Drop for ReaperChildren {
 struct ReaperSender {
     generation: u64,
     sender: Sender<TrackedChild>,
+    /// An eventfd that wakes the reaper for each new child.
+    arrivals: Arc<OwnedFd>,
+}
+
+impl ReaperSender {
+    fn send(&self, tracked: TrackedChild) -> Result<(), mpsc::SendError<TrackedChild>> {
+        self.sender.send(tracked)?;
+        let one = 1_u64;
+        // SAFETY: `arrivals` is a live eventfd and `one` is the 8-byte counter
+        // value eventfd writes take. A saturated counter already wakes.
+        let _ = unsafe {
+            libc::write(
+                self.arrivals.as_raw_fd(),
+                (&raw const one).cast(),
+                size_of::<u64>(),
+            )
+        };
+        Ok(())
+    }
 }
 
 struct ReaperSlot {
@@ -922,17 +946,27 @@ fn reaper_sender() -> io::Result<ReaperSender> {
         return Ok(sender.clone());
     }
 
+    // SAFETY: eventfd takes no pointers; a nonnegative result is a new
+    // descriptor owned by nothing else.
+    let arrivals = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+    if arrivals < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `arrivals` was just created above and is owned only here.
+    let arrivals = Arc::new(unsafe { OwnedFd::from_raw_fd(arrivals) });
     let (sender, receiver) = mpsc::channel();
+    let reaper_arrivals = Arc::clone(&arrivals);
     thread::Builder::new()
         .name("denial-child-reaper".into())
         .spawn(move || {
             crate::cpu_scheduling::normalize_current_worker("child-reaper");
-            reap_children(receiver);
+            reap_children(receiver, &reaper_arrivals);
         })?;
     slot.next_generation = slot.next_generation.wrapping_add(1);
     let sender = ReaperSender {
         generation: slot.next_generation,
         sender,
+        arrivals,
     };
     slot.active = Some(sender.clone());
     Ok(sender)
@@ -982,24 +1016,22 @@ fn terminate_application_group(child: &mut Child) -> io::Result<()> {
     child.kill()
 }
 
-fn reap_children(receiver: Receiver<TrackedChild>) {
+fn reap_children(receiver: Receiver<TrackedChild>, arrivals: &OwnedFd) {
     let mut children = ReaperChildren(Vec::with_capacity(MAX_TRACKED_APPLICATIONS));
     let mut disconnected = false;
     loop {
-        let received = if disconnected {
-            thread::sleep(REAPER_POLL_INTERVAL);
-            Err(mpsc::RecvTimeoutError::Timeout)
-        } else if children.0.is_empty() {
-            receiver
-                .recv()
-                .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
-        } else {
-            receiver.recv_timeout(REAPER_POLL_INTERVAL)
-        };
-        match received {
-            Ok(child) => children.0.push(child),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => disconnected = true,
+        loop {
+            match receiver.try_recv() {
+                Ok(mut tracked) => {
+                    tracked.exited = open_pidfd(tracked.child.id());
+                    children.0.push(tracked);
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+            }
         }
 
         children
@@ -1029,5 +1061,69 @@ fn reap_children(receiver: Receiver<TrackedChild>) {
         if disconnected && children.0.is_empty() {
             return;
         }
+        wait_for_exit_or_arrival(arrivals, &children.0);
     }
+}
+
+fn open_pidfd(pid: u32) -> Option<OwnedFd> {
+    // SAFETY: pidfd_open takes a PID and flags and returns a new descriptor
+    // or -1. The child is not reaped yet, so its PID cannot have been reused.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0) };
+    match RawFd::try_from(fd) {
+        // SAFETY: a nonnegative result is a new descriptor owned only here.
+        Ok(fd) if fd >= 0 => Some(unsafe { OwnedFd::from_raw_fd(fd) }),
+        _ => {
+            warn!(pid, error = %io::Error::last_os_error(), "could not watch application process exit");
+            None
+        }
+    }
+}
+
+/// Sleeps until a tracked child exits or another one arrives. A child without
+/// a pidfd is checked again after `REAPER_POLL_INTERVAL`.
+fn wait_for_exit_or_arrival(arrivals: &OwnedFd, children: &[TrackedChild]) {
+    let mut poll_fds = std::iter::once(arrivals.as_raw_fd())
+        .chain(
+            children
+                .iter()
+                .filter_map(|tracked| tracked.exited.as_ref().map(AsRawFd::as_raw_fd)),
+        )
+        .map(|fd| libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        })
+        .collect::<Vec<_>>();
+    let timeout = if children.iter().any(|tracked| tracked.exited.is_none()) {
+        REAPER_POLL_INTERVAL.as_millis() as libc::c_int
+    } else {
+        -1
+    };
+    // SAFETY: `poll_fds` holds initialized pollfd values for descriptors that
+    // the caller keeps open for the duration of this call.
+    let ready = unsafe {
+        libc::poll(
+            poll_fds.as_mut_ptr(),
+            poll_fds.len() as libc::nfds_t,
+            timeout,
+        )
+    };
+    if ready < 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            warn!(%error, "child reaper poll failed");
+            thread::sleep(REAPER_POLL_INTERVAL);
+        }
+        return;
+    }
+    let mut count = 0_u64;
+    // SAFETY: `arrivals` is a live nonblocking eventfd and `count` is the
+    // 8-byte buffer an eventfd read fills. An empty counter returns EAGAIN.
+    let _ = unsafe {
+        libc::read(
+            arrivals.as_raw_fd(),
+            (&raw mut count).cast(),
+            size_of::<u64>(),
+        )
+    };
 }
