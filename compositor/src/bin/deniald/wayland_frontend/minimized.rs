@@ -6,6 +6,9 @@
 //! callbacks a paused window asks for are parked and sent once it is
 //! restored, and the kept frame stays until the restored window shows a new
 //! one. The desktop shell lets minimized windows draw at the output's rate.
+//!
+//! The phone's lock screen covers every window: all of them are suspended
+//! while the session is locked, so apps stay paused until it unlocks.
 
 use std::collections::HashSet;
 
@@ -14,6 +17,7 @@ use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 
 use super::WaylandFrontend;
+use super::managed_window::ManagedWindow;
 
 /// How often a window gets frame callbacks. Per-app rates for minimized
 /// windows go here.
@@ -34,6 +38,8 @@ pub(super) struct MinimizedWindows {
     /// The textures of frozen windows in the scene last built: they keep
     /// their frame without being given a new one.
     kept_textures: Vec<u64>,
+    /// The lock screen covers every window.
+    covered: bool,
 }
 
 impl WaylandFrontend {
@@ -73,6 +79,29 @@ impl WaylandFrontend {
             if self.minimized_windows.parked.remove(root) {
                 self.pending_frame_callback_windows.insert(root.clone());
             }
+        }
+    }
+
+    /// Whether the lock screen covers every window: they stay suspended.
+    pub(super) fn windows_covered(&self) -> bool {
+        self.minimized_windows.covered
+    }
+
+    /// Follows the phone's session lock: suspends every window while the
+    /// lock screen covers it, and gives unlocked windows back their state.
+    pub(crate) fn set_windows_covered(&mut self, covered: bool) {
+        if !self.mobile_shell || self.minimized_windows.covered == covered {
+            return;
+        }
+        self.minimized_windows.covered = covered;
+        for window in self.space.elements() {
+            let Some(managed) = ManagedWindow::new(window) else {
+                continue;
+            };
+            let minimized = self
+                .window_root_surface(window)
+                .is_some_and(|root| self.surface_is_minimized(&root.id()));
+            managed.prepare_suspended(covered || minimized);
         }
     }
 

@@ -2092,6 +2092,13 @@ impl XdgShellHandler for RuntimeState {
             let frontend = self.wayland.as_mut().expect("missing Wayland frontend");
             frontend.register_window(&focus);
             frontend.defer_initial_auxiliary_toplevel_placement(&focus);
+            #[cfg(feature = "flutter")]
+            if frontend.windows_covered() {
+                // Opened behind the lock screen: suspended from the start.
+                surface.with_pending_state(|pending| {
+                    pending.states.set(xdg_toplevel::State::Suspended);
+                });
+            }
             let window = Window::new_wayland_window(surface);
             let offset = frontend.next_window_offset;
             frontend.next_window_offset = (frontend.next_window_offset + 48).min(384);

@@ -64,6 +64,9 @@ pub(super) fn synchronize_authentication_boundary(events: &mut RuntimeState) {
     {
         events.scene_sync.mark_dirty();
     }
+    if let Some(frontend) = events.wayland.as_mut() {
+        frontend.set_windows_covered(locked);
+    }
     if locked {
         events.pending_shell_actions.clear();
         events.plugin_actions.pending.clear();

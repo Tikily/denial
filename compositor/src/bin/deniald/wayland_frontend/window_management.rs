@@ -244,7 +244,7 @@ pub(super) fn activate_window(
                 .window_root_surface(window)
                 .is_some_and(|surface| frontend.set_surface_minimized(surface.id(), false));
             if resumed && let Some(managed) = ManagedWindow::new(window) {
-                managed.prepare_minimized(false);
+                managed.prepare_minimized(false, frontend.windows_covered());
             }
             if resumed {
                 frontend.reconcile_window_layout(window);
@@ -1151,7 +1151,7 @@ fn restore_minimized_window_for_move(state: &mut RuntimeState, window_id: u64) {
         return;
     }
     if let Some(managed) = ManagedWindow::new(&window) {
-        managed.prepare_minimized(false);
+        managed.prepare_minimized(false, frontend.windows_covered());
     }
     state
         .pending_window_events
@@ -2873,14 +2873,15 @@ pub(super) fn apply_managed_minimize(
     let Some(managed) = ManagedWindow::new(window) else {
         return false;
     };
-    let Some(root) = state
-        .wayland
-        .as_ref()
-        .and_then(|frontend| frontend.window_root_surface(window))
-    else {
+    let Some((root, covered)) = state.wayland.as_ref().and_then(|frontend| {
+        Some((
+            frontend.window_root_surface(window)?,
+            frontend.windows_covered(),
+        ))
+    }) else {
         return false;
     };
-    managed.prepare_minimized(minimized);
+    managed.prepare_minimized(minimized, covered);
     state
         .wayland
         .as_mut()
@@ -2951,7 +2952,7 @@ pub(crate) fn finalize_topology_window_reconciliation(
             continue;
         };
         if let Some(managed) = ManagedWindow::new(&window) {
-            managed.prepare_minimized(true);
+            managed.prepare_suspended(true);
         }
         let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
         changed |= frontend.set_surface_minimized(root.id(), true);
