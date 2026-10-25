@@ -578,12 +578,13 @@ class _QuickTileState extends State<QuickTile>
       onBorder: _focused || !glass ? accent.primary : null,
       borderWidth: _focused ? 1.5 : 1,
     );
-    return AnimatedBuilder(
-      animation: _pour,
-      builder: (context, _) {
-        final level = _pour.level;
-        final dry = level < 1;
-        final wet = level > 0 || _pour.surface.abs() > 0.5;
+    // The liquid moves in the clippers and the painter; the tree is rebuilt
+    // only when the tile turns full, empty or in between.
+    return ValueListenableBuilder<_PourPhase>(
+      valueListenable: _pour.phase,
+      builder: (context, phase, _) {
+        final dry = phase.dry;
+        final wet = phase.wet;
         Widget layer(_TileInk ink, bool liquid, bool shown) => Visibility(
           visible: shown,
           maintainState: true,
@@ -606,8 +607,10 @@ class _QuickTileState extends State<QuickTile>
             ),
           ),
         );
+        // Only an off tile frosts its backdrop, as before the liquid: a lit
+        // tile sloshing below its brim does not pay for a blur.
         return ShellBackdropBlur(
-          blur: dry && glass && theme.effectivePanelOpacity < 1,
+          blur: !widget.active && glass && theme.effectivePanelOpacity < 1,
           separateChild: true,
           borderRadius: BorderRadius.circular(radius),
           // The painter rounds the tile itself.
@@ -701,8 +704,31 @@ class _TilePour extends ChangeNotifier {
   double centre = 0.5;
   bool reduced = false;
 
+  /// Whether the tile shows any dry glass and any liquid.
+  late final ValueNotifier<_PourPhase> phase = ValueNotifier(_phaseNow());
+
+  /// The surface of the current frame, kept for the clippers and the
+  /// painter that all ask for it.
+  List<Offset>? _points;
+  Size _pointsSize = Size.zero;
+
   double get level =>
       (_level.value - math.max(0.0, _slack.value)).clamp(0.0, 1.0).toDouble();
+
+  _PourPhase _phaseNow() {
+    final level = this.level;
+    return _PourPhase(dry: level < 1, wet: level > 0 || surface.abs() > 0.5);
+  }
+
+  /// The liquid moved: drops the kept surface and tells the clippers, the
+  /// painter and, when it changed, the tile.
+  void _moved() {
+    _points = null;
+    final now = _phaseNow();
+    if (now != phase.value) phase.value = now;
+    notifyListeners();
+  }
+
   double get surface => _surface.value;
   double get time => _time;
 
@@ -712,7 +738,7 @@ class _TilePour extends ChangeNotifier {
     if (reduced) {
       _level.settle();
       _surface.set(0);
-      notifyListeners();
+      _moved();
       return;
     }
     if (!_ticker.isActive) {
@@ -746,7 +772,7 @@ class _TilePour extends ChangeNotifier {
     if (reduced) {
       _slack.settle();
       _surface.set(0);
-      notifyListeners();
+      _moved();
       return;
     }
     if (!_ticker.isActive) {
@@ -755,21 +781,28 @@ class _TilePour extends ChangeNotifier {
     }
   }
 
+  /// The liquid below its surface, or with [liquid] false the dry glass
+  /// above it.
   Path region(Size size, {required bool liquid}) {
     _height = size.height;
-    final body = _surfacePath(size);
-    if (liquid) return body;
-    return Path.combine(
-      PathOperation.difference,
-      Path()..addRect(Offset.zero & size),
-      body,
-    );
+    final points = _surfaceLine(size);
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (final point in points.skip(1)) {
+      path.lineTo(point.dx, point.dy);
+    }
+    final edge = liquid ? size.height : 0.0;
+    return path
+      ..lineTo(size.width, edge)
+      ..lineTo(0, edge)
+      ..close();
   }
 
-  /// The liquid below its surface. Waves are sized in pixels, so a wide
-  /// tile sloshes like a wide container: a taller swell where the tap
+  /// The liquid's surface, left to right. Waves are sized in pixels, so a
+  /// wide tile sloshes like a wide container: a taller swell where the tap
   /// landed, a tilt, and waves running across it.
-  Path _surfacePath(Size size) {
+  List<Offset> _surfaceLine(Size size) {
+    final kept = _points;
+    if (kept != null && size == _pointsSize) return kept;
     final width = size.width;
     final y = size.height * (1 - level);
     // A full or empty tile has no surface to show.
@@ -780,7 +813,7 @@ class _TilePour extends ChangeNotifier {
     final wave = bulge.abs() * 0.3;
     final spread = (width * 0.22).clamp(14.0, 26.0);
     const steps = 20;
-    final path = Path();
+    final points = <Offset>[];
     for (var i = 0; i <= steps; i += 1) {
       final t = i / steps;
       final x = width * t;
@@ -790,16 +823,10 @@ class _TilePour extends ChangeNotifier {
           bulge * math.exp(-distance * distance / 2) +
           tilt * (1 - 2 * t) +
           wave * math.sin(x / 9 - _time * 9);
-      if (i == 0) {
-        path.moveTo(x, top);
-      } else {
-        path.lineTo(x, top);
-      }
+      points.add(Offset(x, top));
     }
-    return path
-      ..lineTo(width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
+    _pointsSize = size;
+    return _points = points;
   }
 
   void _tick(Duration elapsed) {
@@ -816,7 +843,7 @@ class _TilePour extends ChangeNotifier {
       (_level.velocity - _slack.velocity) * _height * 0.6,
     );
     _surface.step(dt);
-    notifyListeners();
+    _moved();
     if (_level.resting(0.0005) &&
         _slack.resting(0.0005) &&
         _surface.resting(0.05)) {
@@ -824,15 +851,31 @@ class _TilePour extends ChangeNotifier {
       _slack.settle();
       _surface.settle();
       _ticker.stop();
-      notifyListeners();
+      _moved();
     }
   }
 
   @override
   void dispose() {
     _ticker.dispose();
+    phase.dispose();
     super.dispose();
   }
+}
+
+@immutable
+class _PourPhase {
+  const _PourPhase({required this.dry, required this.wet});
+
+  final bool dry;
+  final bool wet;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _PourPhase && other.dry == dry && other.wet == wet;
+
+  @override
+  int get hashCode => Object.hash(dry, wet);
 }
 
 class _PourClipper extends CustomClipper<Path> {
