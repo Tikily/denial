@@ -871,6 +871,8 @@ struct SharedAuthentication {
     condition: Condvar,
     /// Wakes the logind worker when the lock state changes or it must stop.
     changed: crate::wakeup::Wakeup,
+    /// Wakes the lock-capability worker to stop.
+    capability_stop: crate::wakeup::Wakeup,
     events: Mutex<VecDeque<AuthenticationEvent>>,
 }
 
@@ -956,6 +958,7 @@ impl AuthenticationController {
             events_pending: AtomicBool::new(false),
             fingerprint_unlock_pending: AtomicBool::new(false),
             changed: crate::wakeup::Wakeup::new()?,
+            capability_stop: crate::wakeup::Wakeup::new()?,
             state: Mutex::new(AuthenticationState {
                 stopping: false,
                 busy: false,
@@ -1277,6 +1280,7 @@ impl Drop for AuthenticationController {
             state.prompt = None;
         }
         self.shared.notify();
+        self.shared.capability_stop.wake();
         for worker in [&self.session_worker, &self.capability_worker] {
             if lock_unpoisoned(worker)
                 .take()
