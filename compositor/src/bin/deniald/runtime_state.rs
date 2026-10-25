@@ -9,6 +9,8 @@ pub(super) struct RuntimeState {
     pub(super) fingerprint: fingerprint_presentation::Controller,
     #[cfg(feature = "flutter")]
     pub(super) screen_off_touch: screen_off_touch::Filter,
+    #[cfg(feature = "flutter")]
+    pub(super) wifi_power_save: wifi_power_save::WifiPowerSave,
     pub(super) pending: HashSet<crtc::Handle>,
     pub(super) completed_page_flips: VecDeque<PageFlipCompletion>,
     pub(super) presentation_timings: HashMap<crtc::Handle, presentation_clock::ModeTiming>,

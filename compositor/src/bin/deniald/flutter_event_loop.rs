@@ -2452,6 +2452,9 @@ fn synchronize_power_policy(
         }
     }
     release_sleep_delay_if_ready(scanouts, events);
+    events
+        .wifi_power_save
+        .sync(scanouts.iter().any(|scanout| scanout.powered));
     // The output publisher normally clears this bit at the start of the
     // iteration, so a transition to dirty here asks for one publication
     // boundary before more work. During confirmation rollback publication is

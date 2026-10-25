@@ -146,6 +146,9 @@ mod wayland_frontend;
 #[path = "deniald/welcome.rs"]
 mod welcome;
 #[cfg(feature = "flutter")]
+#[path = "deniald/wifi_power_save.rs"]
+mod wifi_power_save;
+#[cfg(feature = "flutter")]
 #[path = "deniald/window_events.rs"]
 mod window_events;
 #[path = "deniald/window_grab.rs"]
