@@ -281,8 +281,15 @@ impl FlutterRuntime {
         Ok(())
     }
 
-    pub fn shutdown(mut self) -> Result<(), EngineError> {
+    /// Stops the engine and releases its resources; the runtime stays inert
+    /// afterwards, so a replacement can be installed in its place.
+    pub fn shutdown(&mut self) -> Result<(), EngineError> {
         self.shutdown_engine()
+    }
+
+    /// False once the engine has been shut down.
+    pub fn is_running(&self) -> bool {
+        self.host.is_some()
     }
 
     pub(super) fn shutdown_engine(&mut self) -> Result<(), EngineError> {

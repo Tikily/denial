@@ -20,7 +20,8 @@ pub(super) struct HotplugRequest<'a, 'event_loop> {
     pub(super) event_loop: &'a mut EventLoop<'event_loop, RuntimeState>,
     pub(super) events: &'a mut RuntimeState,
     #[cfg(feature = "flutter")]
-    pub(super) flutter: &'a mut Option<flutter_runtime::FlutterRuntime>,
+    /// Absent only in the diagnostic frame loop, which runs no shell.
+    pub(super) flutter: Option<&'a mut flutter_runtime::FlutterRuntime>,
     #[cfg(feature = "flutter")]
     pub(super) flutter_launcher: Option<&'a mut FlutterLauncher>,
 }
@@ -216,6 +217,17 @@ pub(super) fn apply_resident_mode_topology(
     Ok(())
 }
 
+/// Replaces the shut-down runtime a restart left in place.
+#[cfg(feature = "flutter")]
+fn install_runtime(
+    slot: &mut Option<&mut flutter_runtime::FlutterRuntime>,
+    runtime: flutter_runtime::FlutterRuntime,
+) {
+    if let Some(slot) = slot.as_deref_mut() {
+        *slot = runtime;
+    }
+}
+
 pub(super) fn apply_hotplug_topology(
     request: HotplugRequest<'_, '_>,
 ) -> Result<(), Box<dyn Error>> {
@@ -233,7 +245,7 @@ pub(super) fn apply_hotplug_topology(
         event_loop,
         events,
         #[cfg(feature = "flutter")]
-        flutter,
+        mut flutter,
         #[cfg(feature = "flutter")]
         mut flutter_launcher,
     } = request;
@@ -448,36 +460,32 @@ pub(super) fn apply_hotplug_topology(
 
     #[cfg(feature = "flutter")]
     {
-        let restart_flutter = if flutter.is_some() {
+        let restart_flutter = if let Some(old_runtime) = flutter.as_deref_mut() {
             // Shut the old engine down while both its GBM pool and the reversible
             // scanout journal are still alive. From this point onward replacing or
             // unwinding the pool can no longer race EGLImage/target destruction.
-            let Some(mut old_runtime) = flutter.take() else {
-                return Err("Flutter runtime disappeared during topology restart".into());
-            };
             let prepare_restart = (|| -> Result<(), Box<dyn Error>> {
                 old_runtime.process_events(events.flutter_events.drain(..))?;
                 if let Some(launcher) = flutter_launcher.as_deref_mut()
-                    && launcher.synchronize_ui_development(&mut old_runtime)?
+                    && launcher.synchronize_ui_development(old_runtime)?
                 {
                     events.flutter_reload_requested = true;
                 }
                 synchronize_authentication_boundary(events);
-                synchronize_clipboard(&mut old_runtime, events)?;
-                synchronize_system_control_events(&mut old_runtime, events)?;
-                synchronize_shell_keyboard(&mut old_runtime, events)?;
-                synchronize_settings(&mut old_runtime, events)?;
+                synchronize_clipboard(old_runtime, events)?;
+                synchronize_system_control_events(old_runtime, events)?;
+                synchronize_shell_keyboard(old_runtime, events)?;
+                synchronize_settings(old_runtime, events)?;
                 synchronize_system_bar_configuration(
-                    &mut old_runtime,
+                    old_runtime,
                     events,
                     flutter_launcher.as_deref_mut(),
                 );
-                synchronize_flutter_window_management(&mut old_runtime, events)?;
-                synchronize_flutter_input_layout(&mut old_runtime, events)?;
+                synchronize_flutter_window_management(old_runtime, events)?;
+                synchronize_flutter_input_layout(old_runtime, events)?;
                 Ok(())
             })();
             if let Err(error) = prepare_restart {
-                *flutter = Some(old_runtime);
                 let failures = rollback_hotplug_scanouts(
                     reconciliation,
                     &old_framebuffers,
@@ -612,12 +620,13 @@ pub(super) fn apply_hotplug_topology(
                         })();
                     match restore {
                         Ok(runtime) => {
-                            *flutter = Some(runtime);
+                            install_runtime(&mut flutter, runtime);
                             events.begin_replacement_flutter_generation(old_size);
                             warn!(
                                 "restored Flutter on the previous output pools after rejected topology change"
                             );
                         }
+                        // The runtime stays shut down; its loop ends with this error.
                         Err(error) => {
                             failures.push(format!("Flutter rollback restart failed: {error}"))
                         }
@@ -632,7 +641,7 @@ pub(super) fn apply_hotplug_topology(
         events.output_control_dirty = true;
         let retired = std::mem::replace(swapchain, staged);
         if let Some(runtime) = replacement {
-            *flutter = Some(runtime);
+            install_runtime(&mut flutter, runtime);
             events.begin_replacement_flutter_generation(swapchain.desktop_size());
             info!(
                 generation = flutter_launcher.as_deref().unwrap().generation,

@@ -7,6 +7,8 @@ use super::*;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum FlutterReloadOutcome {
     Replaced,
+    /// The refreshed bundle failed; the shell was started again instead.
+    RolledBack,
     Retained,
 }
 
@@ -183,7 +185,7 @@ pub(super) fn reload_flutter_runtime(
     scanouts: &[Scanout],
     topology: &TopologyManager,
     events: &mut RuntimeState,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     flutter_launcher: &mut FlutterLauncher,
 ) -> Result<FlutterReloadOutcome, Box<dyn Error>> {
     let snapshot = topology.snapshot();
@@ -196,17 +198,13 @@ pub(super) fn reload_flutter_runtime(
     // its imports remain alive. Some EGL drivers cannot reliably tear down an
     // engine and then immediately reimport the same DMA-BUF pool; a failed
     // preflight is still reversible because Flutter has not been taken yet.
-    let prepared = match flutter_launcher.prepare_output_targets(
-        renderer,
-        output_swapchains,
-        atlas.pixel_size,
-    ) {
+    // The second preparation restarts a shell if the replacement fails.
+    let prepare =
+        || flutter_launcher.prepare_output_targets(renderer, output_swapchains, atlas.pixel_size);
+    let (prepared, rollback_prepared) = match prepare().and_then(|a| Ok((a, prepare()?))) {
         Ok(prepared) => prepared,
         Err(error) => {
-            let runtime = flutter
-                .as_mut()
-                .ok_or("Flutter runtime disappeared after bundle refresh preflight")?;
-            flutter_launcher.retain_runtime_after_switch_failure(runtime, error.as_ref());
+            flutter_launcher.retain_runtime_after_switch_failure(flutter, error.as_ref());
             warn!(
                 %error,
                 "Flutter bundle refresh renderer preflight failed; retaining the active runtime"
@@ -214,28 +212,21 @@ pub(super) fn reload_flutter_runtime(
             return Ok(FlutterReloadOutcome::Retained);
         }
     };
-    let Some(mut old_runtime) = flutter.take() else {
-        return Err("Flutter runtime disappeared during bundle refresh".into());
-    };
     let prepare_restart = (|| -> Result<(), Box<dyn Error>> {
-        old_runtime.process_events(events.flutter_events.drain(..))?;
-        let _ = flutter_launcher.synchronize_ui_development(&mut old_runtime)?;
+        flutter.process_events(events.flutter_events.drain(..))?;
+        let _ = flutter_launcher.synchronize_ui_development(flutter)?;
         synchronize_authentication_boundary(events);
-        synchronize_clipboard(&mut old_runtime, events)?;
-        synchronize_system_control_events(&mut old_runtime, events)?;
-        synchronize_shell_keyboard(&mut old_runtime, events)?;
-        synchronize_settings(&mut old_runtime, events)?;
-        synchronize_system_bar_configuration(&mut old_runtime, events, Some(flutter_launcher));
-        synchronize_flutter_window_management(&mut old_runtime, events)?;
-        synchronize_flutter_input_layout(&mut old_runtime, events)?;
+        synchronize_clipboard(flutter, events)?;
+        synchronize_system_control_events(flutter, events)?;
+        synchronize_shell_keyboard(flutter, events)?;
+        synchronize_settings(flutter, events)?;
+        synchronize_system_bar_configuration(flutter, events, Some(flutter_launcher));
+        synchronize_flutter_window_management(flutter, events)?;
+        synchronize_flutter_input_layout(flutter, events)?;
         Ok(())
     })();
     if let Err(error) = prepare_restart {
-        *flutter = Some(old_runtime);
-        let runtime = flutter
-            .as_mut()
-            .expect("restored Flutter runtime after pre-refresh drain failure");
-        flutter_launcher.retain_runtime_after_switch_failure(runtime, error.as_ref());
+        flutter_launcher.retain_runtime_after_switch_failure(flutter, error.as_ref());
         warn!(
             %error,
             "Flutter pre-refresh drain failed; retaining the active runtime"
@@ -246,23 +237,42 @@ pub(super) fn reload_flutter_runtime(
     events
         .native_escape_shortcut
         .set_plugin_actions(&events.plugin_actions);
-    old_runtime
+    flutter
         .shutdown()
         .map_err(|error| format!("Flutter shutdown before refresh failed: {error}"))?;
     events.flutter_events.clear();
 
-    let mut replacement = flutter_launcher.start_with_targets(
-        renderer,
-        output_swapchains,
-        scanouts,
-        &snapshot,
-        &atlas,
-        Some(prepared),
-    )?;
-    events.install_workspace_snapshot(&mut replacement)?;
-    *flutter = Some(replacement);
+    let mut start = |prepared| -> Result<flutter_runtime::FlutterRuntime, Box<dyn Error>> {
+        let mut runtime = flutter_launcher.start_with_targets(
+            renderer,
+            output_swapchains,
+            scanouts,
+            &snapshot,
+            &atlas,
+            Some(prepared),
+        )?;
+        events.install_workspace_snapshot(&mut runtime)?;
+        Ok(runtime)
+    };
+    // A shell that cannot start leaves Denial with nothing to show. Start
+    // again with what the launcher selects now (it falls back to the packaged
+    // shell after a custom one fails); if that fails too, the error ends the
+    // session and systemd starts a new one.
+    let outcome = match start(prepared) {
+        Ok(runtime) => {
+            *flutter = runtime;
+            FlutterReloadOutcome::Replaced
+        }
+        Err(error) => {
+            warn!(%error, "refreshed Flutter bundle did not start; restarting the shell");
+            *flutter = start(rollback_prepared).map_err(|rollback| {
+                format!("refreshed Flutter bundle did not start ({error}), nor did the shell after it ({rollback})")
+            })?;
+            FlutterReloadOutcome::RolledBack
+        }
+    };
     events.begin_replacement_flutter_generation(swapchain.desktop_size());
-    Ok(FlutterReloadOutcome::Replaced)
+    Ok(outcome)
 }
 
 #[cfg(feature = "flutter")]

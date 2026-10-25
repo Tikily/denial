@@ -181,17 +181,12 @@ fn synchronize_software_dimming(
     drm: &mut DrmDevice,
     scanouts: &[Scanout],
     events: &mut RuntimeState,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     known_topology: &mut Option<Vec<(OutputId, crtc::Handle)>>,
 ) -> Result<(), Box<dyn Error>> {
     let requests = flutter
-        .as_mut()
-        .map(|runtime| {
-            runtime
-                .drain_software_dimming_requests()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+        .drain_software_dimming_requests()
+        .collect::<Vec<_>>();
     let topology_changed = gamma_topology_changed(
         known_topology.as_deref(),
         scanouts
@@ -227,10 +222,8 @@ fn synchronize_software_dimming(
         &requests,
         force_gamma_reapply,
     );
-    if let Some(runtime) = flutter.as_mut() {
-        for state in states {
-            runtime.send_software_dimming_state(state)?;
-        }
+    for state in states {
+        flutter.send_software_dimming_state(state)?;
     }
     Ok(())
 }
@@ -254,17 +247,11 @@ fn gamma_work_pending(
 fn handle_ui_development_requests(
     scheduler: &output_scheduler::OutputScheduler,
     events: &mut RuntimeState,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     flutter_launcher: &mut FlutterLauncher,
 ) {
     while let Some(request) = events.pending_ui_development.pop_front() {
-        let Some(runtime) = flutter.as_mut() else {
-            request.reply(Err(output_control::OutputControlFailure::new(
-                "unavailable",
-                "the Flutter runtime is unavailable",
-            )));
-            continue;
-        };
+        let runtime = &mut *flutter;
         let is_query = request.command.kind() == ui_development::CommandKind::Query;
         let (reload_requested, state) =
             flutter_launcher.handle_external_ui_development(runtime, request.command.clone());
@@ -602,10 +589,9 @@ fn create_frame_schedulers(
     volition_events: &output_scheduler::VolitionEvents,
     scanouts: &[Scanout],
     swapchain: &RenderSwapchains,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     events: &mut RuntimeState,
     missing_swapchains: &'static str,
-    missing_runtime: &'static str,
 ) -> Result<
     (
         output_scheduler::OutputScheduler,
@@ -618,7 +604,7 @@ fn create_frame_schedulers(
         volition_events.clone(),
         scanouts,
         swapchain.outputs().ok_or(missing_swapchains)?,
-        flutter.as_mut().ok_or(missing_runtime)?,
+        flutter,
         events,
     )?;
     // Refresh this CRTC timing policy at every initial/modeset/recovery
@@ -639,7 +625,7 @@ fn create_frame_schedulers(
 
 #[allow(clippy::too_many_arguments)]
 fn drain_frames_before_reconfiguration(
-    flutter: &Option<flutter_runtime::FlutterRuntime>,
+    flutter: &flutter_runtime::FlutterRuntime,
     scheduler: &mut output_scheduler::OutputScheduler,
     swapchain: &RenderSwapchains,
     scanouts: &[Scanout],
@@ -647,15 +633,7 @@ fn drain_frames_before_reconfiguration(
     event_loop: &mut EventLoop<'_, RuntimeState>,
     deadline: Option<Instant>,
 ) -> Result<(), Box<dyn Error>> {
-    submit_ready_frames(
-        flutter
-            .as_ref()
-            .ok_or("Flutter runtime disappeared before frame submission")?,
-        scheduler,
-        swapchain,
-        scanouts,
-        events,
-    )?;
+    submit_ready_frames(flutter, scheduler, swapchain, scanouts, events)?;
     let now = Instant::now();
     let timeout = deadline.map_or(Duration::from_millis(50), |deadline| {
         Duration::from_millis(50).min(deadline.saturating_duration_since(now))
@@ -781,7 +759,7 @@ fn prepare_output_persistence(
 
 fn apply_requested_output_power(
     desired_power: BTreeMap<OutputId, bool>,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     scheduler: &mut output_scheduler::OutputScheduler,
     frame_scheduler: &mut frame_scheduler::FrameScheduler,
     swapchain: &mut RenderSwapchains,
@@ -789,15 +767,7 @@ fn apply_requested_output_power(
     events: &mut RuntimeState,
 ) -> Result<(), Box<dyn Error>> {
     events.output_power_requests.extend(desired_power);
-    if apply_output_power_requests(
-        flutter
-            .as_mut()
-            .ok_or("Flutter runtime disappeared during output power application")?,
-        scheduler,
-        swapchain,
-        scanouts,
-        events,
-    )? {
+    if apply_output_power_requests(flutter, scheduler, swapchain, scanouts, events)? {
         frame_scheduler.reconfigure(scanouts, Instant::now());
     }
     Ok(())
@@ -975,7 +945,7 @@ fn acquire_pending_output_apply(
     scheduler: &mut output_scheduler::OutputScheduler,
     drm_scanner: &mut DrmScanner<SimpleCrtcMapper>,
     drm: &mut DrmDevice,
-    flutter: &Option<flutter_runtime::FlutterRuntime>,
+    flutter: &flutter_runtime::FlutterRuntime,
     swapchain: &RenderSwapchains,
     scanouts: &[Scanout],
     events: &mut RuntimeState,
@@ -1045,7 +1015,7 @@ fn apply_resident_output_configuration(
     scanouts: &mut Vec<Scanout>,
     topology: &mut TopologyManager,
     events: &mut RuntimeState,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     scheduler: &mut output_scheduler::OutputScheduler,
     frame_scheduler: &mut frame_scheduler::FrameScheduler,
     output_configuration: &mut RuntimeOutputConfiguration,
@@ -1067,9 +1037,7 @@ fn apply_resident_output_configuration(
         configuration,
         transition,
         events,
-        flutter
-            .as_mut()
-            .ok_or("Flutter runtime disappeared during resident output reconfiguration")?,
+        flutter,
     );
     if let Err(error) = apply {
         let message = error.to_string();
@@ -1127,7 +1095,7 @@ fn apply_hardware_output_configuration(
     raster_frames: u64,
     event_loop: &mut EventLoop<'_, RuntimeState>,
     events: &mut RuntimeState,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     flutter_launcher: &mut FlutterLauncher,
     scheduler: &mut output_scheduler::OutputScheduler,
     frame_scheduler: &mut frame_scheduler::FrameScheduler,
@@ -1150,9 +1118,7 @@ fn apply_hardware_output_configuration(
             staged_configuration: configuration.clone(),
             event_loop,
             events,
-            flutter: flutter
-                .as_mut()
-                .ok_or("Flutter runtime disappeared during resident mode change")?,
+            flutter: flutter,
         })
     } else {
         apply_hotplug_topology(HotplugRequest {
@@ -1168,7 +1134,7 @@ fn apply_hardware_output_configuration(
             frame_number: raster_frames,
             event_loop,
             events,
-            flutter,
+            flutter: Some(&mut *flutter),
             flutter_launcher: Some(flutter_launcher),
         })
     };
@@ -1179,7 +1145,7 @@ fn apply_hardware_output_configuration(
             "apply_failed",
             &message,
         )));
-        if flutter.is_none() {
+        if !flutter.is_running() {
             return Err(format!(
                 "output-control transaction failed after Flutter shutdown: {message}"
             )
@@ -1196,7 +1162,6 @@ fn apply_hardware_output_configuration(
             flutter,
             events,
             "rollback lost its physical output pools",
-            "Flutter runtime disappeared during output-control rollback",
         )?;
         warn!(%message, "rejected output-control transaction");
         return Ok(());
@@ -1216,7 +1181,6 @@ fn apply_hardware_output_configuration(
         flutter,
         events,
         "output scheduler has no physical output pools",
-        "Flutter runtime was not restarted after output reconfiguration",
     )?;
     apply_requested_output_power(
         desired_power,
@@ -1253,7 +1217,7 @@ fn apply_staged_output_configuration(
     raster_frames: u64,
     event_loop: &mut EventLoop<'_, RuntimeState>,
     events: &mut RuntimeState,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     flutter_launcher: &mut FlutterLauncher,
     scheduler: &mut output_scheduler::OutputScheduler,
     frame_scheduler: &mut frame_scheduler::FrameScheduler,
@@ -1376,7 +1340,7 @@ fn service_ready_output_apply(
     raster_frames: u64,
     event_loop: &mut EventLoop<'_, RuntimeState>,
     events: &mut RuntimeState,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     flutter_launcher: &mut FlutterLauncher,
     scheduler: &mut output_scheduler::OutputScheduler,
     frame_scheduler: &mut frame_scheduler::FrameScheduler,
@@ -1394,11 +1358,9 @@ fn service_ready_output_apply(
         return Ok(false);
     };
     let scanout_work_pending = scheduler.has_pending_scanout_work();
-    let resident_targets_idle = flutter.as_ref().is_some_and(|runtime| {
-        scanouts
-            .iter()
-            .all(|scanout| runtime.output_target_available(scanout.output.id))
-    });
+    let resident_targets_idle = scanouts
+        .iter()
+        .all(|scanout| flutter.output_target_available(scanout.output.id));
     if scanout_work_pending || !resident_targets_idle {
         // Connector discovery deliberately spans an event-loop iteration. A
         // Flutter frame which was already in flight can become ready or
@@ -1501,7 +1463,7 @@ fn observe_output_topology(
     scanouts: &[Scanout],
     outputs_disconnected: &mut bool,
     policy_journal: &mut output_policy::OutputPolicyJournal,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     events: &mut RuntimeState,
     event_loop: &mut EventLoop<'_, RuntimeState>,
 ) -> Result<OutputTopologyObservation, Box<dyn Error>> {
@@ -1575,10 +1537,7 @@ fn observe_output_topology(
         if !*outputs_disconnected {
             *outputs_disconnected = true;
             events.output_control_dirty = true;
-            flutter
-                .as_mut()
-                .ok_or("Flutter runtime disappeared while outputs were disconnected")?
-                .set_outputs_visible(false)?;
+            flutter.set_outputs_visible(false)?;
             warn!(
                 retry_ms = KMS_PRESENTATION_RECOVERY_RETRY.as_millis(),
                 "no connected display can be lit; keeping the session alive until one can"
@@ -1641,7 +1600,7 @@ fn apply_observed_output_topology(
     event_loop: &mut EventLoop<'_, RuntimeState>,
     deadline: Option<Instant>,
     events: &mut RuntimeState,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     flutter_launcher: &mut FlutterLauncher,
     scheduler: &mut output_scheduler::OutputScheduler,
     frame_scheduler: &mut frame_scheduler::FrameScheduler,
@@ -1657,20 +1616,16 @@ fn apply_observed_output_topology(
 
     cancel_active_screenshot(
         screenshot_manager,
-        flutter
-            .as_mut()
-            .ok_or("Flutter runtime disappeared before topology change")?,
+        flutter,
         true,
         "display topology changed",
     )?;
     let resident_targets_busy = resident_geometry_reconfigure_requested
         && !changed
         && !kms_reconfigure_requested
-        && flutter.as_ref().is_none_or(|runtime| {
-            scanouts
-                .iter()
-                .any(|scanout| !runtime.output_target_available(scanout.output.id))
-        });
+        && scanouts
+            .iter()
+            .any(|scanout| !flutter.output_target_available(scanout.output.id));
     if !scanout_rebased && (scheduler.has_pending_scanout_work() || resident_targets_busy) {
         // Finish any ready old-topology batch before creating the common
         // rollback point used by the hotplug transaction.
@@ -1700,9 +1655,7 @@ fn apply_observed_output_topology(
             staged_configuration,
             flutter_runtime::OutputGeometryTransition::Immediate,
             events,
-            flutter
-                .as_mut()
-                .ok_or("Flutter runtime disappeared during resident geometry rollback")?,
+            flutter,
         )?;
         frame_scheduler.reconfigure(scanouts, Instant::now());
         events.scanout_rebased = false;
@@ -1723,11 +1676,11 @@ fn apply_observed_output_topology(
         frame_number: raster_frames,
         event_loop,
         events,
-        flutter,
+        flutter: Some(&mut *flutter),
         flutter_launcher: Some(flutter_launcher),
     });
     if let Err(error) = topology_apply {
-        if scanout_rebased && flutter.is_some() {
+        if scanout_rebased && flutter.is_running() {
             // A monitor may still be link-training after the synchronous
             // recovery baseline. Keep the login alive and retry a fresh scan.
             warn!(
@@ -1750,7 +1703,6 @@ fn apply_observed_output_topology(
         flutter,
         events,
         "output scheduler has no physical output pools",
-        "Flutter runtime was not restarted after topology change",
     )?;
     if events.flutter_reload_requested {
         events.flutter_reload_requested = false;
@@ -1776,7 +1728,7 @@ fn service_flutter_reload(
     event_loop: &mut EventLoop<'_, RuntimeState>,
     deadline: Option<Instant>,
     events: &mut RuntimeState,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     flutter_launcher: &mut FlutterLauncher,
     scheduler: &mut output_scheduler::OutputScheduler,
     frame_scheduler: &mut frame_scheduler::FrameScheduler,
@@ -1788,18 +1740,14 @@ fn service_flutter_reload(
     }
     cancel_active_screenshot(
         screenshot_manager,
-        flutter
-            .as_mut()
-            .ok_or("Flutter runtime disappeared before bundle refresh")?,
+        flutter,
         true,
         "Flutter runtime is refreshing",
     )?;
     let scanout_work_pending = scheduler.has_pending_scanout_work();
-    let resident_targets_idle = flutter.as_ref().is_some_and(|runtime| {
-        scanouts
-            .iter()
-            .all(|scanout| runtime.output_target_available(scanout.output.id))
-    });
+    let resident_targets_idle = scanouts
+        .iter()
+        .all(|scanout| flutter.output_target_available(scanout.output.id));
     if scanout_work_pending || !resident_targets_idle {
         // Stop servicing the producer while its last output batch reaches
         // every affected CRTC. A ready fence or page flip wakes calloop.
@@ -1821,7 +1769,7 @@ fn service_flutter_reload(
     )?;
     events.flutter_reload_requested = false;
     match reload {
-        FlutterReloadOutcome::Replaced => {
+        FlutterReloadOutcome::Replaced | FlutterReloadOutcome::RolledBack => {
             *retired_output_flips =
                 retired_output_flips.saturating_add(scheduler.presented_frames());
             (*scheduler, *frame_scheduler) = create_frame_schedulers(
@@ -1832,7 +1780,6 @@ fn service_flutter_reload(
                 flutter,
                 events,
                 "output scheduler has no physical output pools",
-                "Flutter runtime was not restarted after bundle refresh",
             )?;
             info!(
                 generation = flutter_launcher.generation,
@@ -1858,16 +1805,13 @@ fn service_page_flip_completions(
     event_loop: &mut EventLoop<'_, RuntimeState>,
     iteration_now: Instant,
     events: &mut RuntimeState,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     scheduler: &mut output_scheduler::OutputScheduler,
     frame_scheduler: &mut frame_scheduler::FrameScheduler,
 ) -> Result<bool, Box<dyn Error>> {
-    let (changed, power) = events.fingerprint.service(
-        drm,
-        renderer,
-        scanouts,
-        flutter.as_mut().ok_or("fingerprint requires Flutter")?,
-    )?;
+    let (changed, power) = events
+        .fingerprint
+        .service(drm, renderer, scanouts, flutter)?;
     for (output, powered) in power {
         events.output_power_requests.insert(output, powered);
     }
@@ -1875,9 +1819,7 @@ fn service_page_flip_completions(
         frame_scheduler.mark_all_dirty();
         wayland_frontend::reset_all_input_devices(events);
     }
-    let runtime = flutter
-        .as_mut()
-        .ok_or("Flutter runtime disappeared during page-flip completion")?;
+    let runtime = &mut *flutter;
     scheduler.handle_completions(
         runtime,
         swapchain
@@ -2247,7 +2189,7 @@ fn acknowledge_render_events(
     scanouts: &[Scanout],
     event_loop: &mut EventLoop<'_, RuntimeState>,
     events: &mut RuntimeState,
-    flutter: &Option<flutter_runtime::FlutterRuntime>,
+    flutter: &flutter_runtime::FlutterRuntime,
     scheduler: &mut output_scheduler::OutputScheduler,
     volition_events: &output_scheduler::VolitionEvents,
 ) -> Result<bool, Box<dyn Error>> {
@@ -2255,12 +2197,7 @@ fn acknowledge_render_events(
         install_sampled_buffer_releases(event_loop, events)?;
     }
     if !events.ready_fence_signals.is_empty() {
-        scheduler.acknowledge_ready_fences(
-            flutter
-                .as_ref()
-                .ok_or("Flutter runtime disappeared during fence acknowledgement")?,
-            events.ready_fence_signals.drain(..),
-        )?;
+        scheduler.acknowledge_ready_fences(flutter, events.ready_fence_signals.drain(..))?;
     }
     volition_events.drain_into(&mut events.volition_events);
     if events.volition_events.is_empty() {
@@ -2293,7 +2230,7 @@ fn apply_pending_sensor_orientation(
     topology: &mut TopologyManager,
     scheduler: &mut output_scheduler::OutputScheduler,
     frame_scheduler: &mut frame_scheduler::FrameScheduler,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     events: &mut RuntimeState,
     now: Instant,
 ) -> Result<(), Box<dyn Error>> {
@@ -2306,12 +2243,10 @@ fn apply_pending_sensor_orientation(
     );
     if requested_rotation == output_configuration.sensor_rotation
         || scheduler.has_pending_scanout_work()
-        || flutter.as_ref().is_none_or(|runtime| {
-            runtime.output_rotation_animation_active()
-                || scanouts
-                    .iter()
-                    .any(|scanout| !runtime.output_target_available(scanout.output.id))
-        })
+        || flutter.output_rotation_animation_active()
+        || scanouts
+            .iter()
+            .any(|scanout| !flutter.output_target_available(scanout.output.id))
     {
         return Ok(());
     }
@@ -2323,9 +2258,7 @@ fn apply_pending_sensor_orientation(
         output_configuration,
         requested_rotation,
         events,
-        flutter
-            .as_mut()
-            .ok_or("Flutter runtime disappeared during automatic orientation")?,
+        flutter,
     )?;
     if let Some(pending) = active_output_confirmation.as_mut() {
         pending.rollback_configuration.sensor_rotation = requested_rotation;
@@ -2456,7 +2389,7 @@ fn synchronize_power_policy(
     swapchain: &mut RenderSwapchains,
     scheduler: &mut output_scheduler::OutputScheduler,
     frame_scheduler: &mut frame_scheduler::FrameScheduler,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     events: &mut RuntimeState,
     now: Instant,
 ) -> Result<bool, Box<dyn Error>> {
@@ -2472,15 +2405,8 @@ fn synchronize_power_policy(
     synchronize_fingerprint_display_wake(scanouts, scheduler, events);
     synchronize_sleep_transition(scanouts, events);
     if !scanout_rebased && !events.output_power_requests.is_empty() {
-        let power_changed = apply_output_power_requests(
-            flutter
-                .as_mut()
-                .ok_or("Flutter runtime disappeared during DPMS dispatch")?,
-            scheduler,
-            swapchain,
-            scanouts,
-            events,
-        )?;
+        let power_changed =
+            apply_output_power_requests(flutter, scheduler, swapchain, scanouts, events)?;
         if power_changed {
             frame_scheduler.reconfigure(scanouts, Instant::now());
         }
@@ -2504,7 +2430,7 @@ fn synchronize_power_policy(
 #[allow(clippy::too_many_arguments)]
 fn shutdown_flutter_session(
     screenshot_manager: &mut Option<screenshot::ScreenshotManager>,
-    flutter: &mut Option<flutter_runtime::FlutterRuntime>,
+    flutter: &mut flutter_runtime::FlutterRuntime,
     scheduler: &mut output_scheduler::OutputScheduler,
     drm: &mut DrmDevice,
     swapchain: &mut RenderSwapchains,
@@ -2515,9 +2441,7 @@ fn shutdown_flutter_session(
 ) -> Result<(), Box<dyn Error>> {
     cancel_active_screenshot(
         screenshot_manager,
-        flutter
-            .as_mut()
-            .ok_or("Flutter runtime disappeared before screenshot teardown")?,
+        flutter,
         false,
         "compositor is shutting down",
     )?;
@@ -2532,9 +2456,7 @@ fn shutdown_flutter_session(
         }
     }
     quiesce_flutter_page_flips(
-        flutter
-            .as_mut()
-            .ok_or("Flutter runtime disappeared before page-flip quiescence")?,
+        flutter,
         scheduler,
         drm,
         swapchain,
@@ -2545,8 +2467,6 @@ fn shutdown_flutter_session(
     );
     scheduler.shutdown_volition();
     flutter
-        .take()
-        .ok_or("Flutter runtime disappeared during orderly shutdown")?
         .shutdown()
         .map_err(|error| format!("Flutter engine shutdown failed: {error}"))?;
     Ok(())
@@ -2620,9 +2540,13 @@ pub(super) fn run_flutter_event_loop(
         .map(|_| SystemControls::new())
         .transpose()?;
     let notification_server = start_notification_server(event_loop)?;
-    let initial_runtime = flutter
-        .as_ref()
+    // The startup boundary owns the runtime; it stays alive for the whole
+    // loop. A replacement that cannot start, nor restart the old shell,
+    // shuts it down and ends the loop.
+    let flutter = flutter
+        .as_mut()
         .ok_or("Flutter runtime was not initialized")?;
+    let initial_runtime = &*flutter;
     let authentication = Some(initial_runtime.authentication());
     let clipboard = initial_runtime.clipboard();
     let native_escape_shortcut = wayland
@@ -2696,12 +2620,8 @@ pub(super) fn run_flutter_event_loop(
         flutter,
         &mut events,
         "output scheduler has no physical output pools",
-        "Flutter runtime disappeared before output scheduling",
     )?;
-    flutter
-        .as_mut()
-        .ok_or("Flutter runtime disappeared during initial visibility publication")?
-        .set_outputs_visible(scanouts.iter().any(|scanout| scanout.powered))?;
+    flutter.set_outputs_visible(scanouts.iter().any(|scanout| scanout.powered))?;
     let mut screenshot_manager = match screenshot::ScreenshotManager::new(events.clipboard.clone())
     {
         Ok(manager) => Some(manager),
@@ -2842,10 +2762,10 @@ pub(super) fn run_flutter_event_loop(
         // unrelated publication boundary skip topology repair for one
         // iteration; the stale scheduler then immediately redetects the same
         // submitted frame and can spin in KMS recovery with every CRTC off.
-        if scanout_rebased && let Some(runtime) = flutter.as_mut() {
+        if scanout_rebased {
             cancel_active_screenshot(
                 &mut screenshot_manager,
-                runtime,
+                flutter,
                 true,
                 "scanout state changed",
             )?;
@@ -2865,9 +2785,7 @@ pub(super) fn run_flutter_event_loop(
             )? {
                 continue;
             }
-            let runtime = flutter
-                .as_mut()
-                .ok_or("Flutter runtime disappeared during frame scheduling")?;
+            let runtime = &mut *flutter;
             publish_completed_flutter_frames(
                 runtime,
                 &mut scheduler,
@@ -3075,9 +2993,7 @@ pub(super) fn run_flutter_event_loop(
             continue;
         }
 
-        let runtime = flutter
-            .as_mut()
-            .ok_or("Flutter runtime disappeared from event loop")?;
+        let runtime = &mut *flutter;
         // Close/focus/configure are interactive commands, not periodic service
         // work. Drain them before a spent background slice can defer them;
         // otherwise busy frames can indefinitely postpone an app's close.
