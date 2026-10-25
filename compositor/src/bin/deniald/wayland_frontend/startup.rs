@@ -283,6 +283,8 @@ impl WaylandFrontend {
             );
         }
         let libinput = init_libinput(event_loop, session.clone(), seat_name)?;
+        #[cfg(feature = "flutter")]
+        let input_rescan = super::input_hotplug::init(event_loop, &session)?;
         Ok(Self {
             output_metadata_device: display_device,
             start_time: Instant::now(),
@@ -478,6 +480,8 @@ impl WaylandFrontend {
             session,
             layer_shell_state,
             libinput,
+            #[cfg(feature = "flutter")]
+            input_rescan,
             settings,
             shortcuts,
             keyboard_layout_names,

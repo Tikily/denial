@@ -4,11 +4,7 @@ use super::super::RuntimeState;
 use serde::Deserialize;
 use smithay::backend::session::{Session, libseat::LibSeatSession};
 use smithay::reexports::{
-    calloop::{
-        EventLoop, Interest, LoopHandle, Mode, PostAction,
-        generic::Generic,
-        timer::{TimeoutAction, Timer},
-    },
+    calloop::{Interest, LoopHandle, Mode, PostAction, generic::Generic},
     rustix::{fs::OFlags, io as rio, ioctl::opcode},
 };
 use std::{
@@ -22,11 +18,9 @@ use std::{
     },
     path::{Path, PathBuf},
     rc::Rc,
-    time::Duration,
 };
 use tracing::{info, warn};
 
-const RESCAN: Duration = Duration::from_secs(2);
 const EVENT_BYTES: usize = size_of::<libc::input_event>();
 const EVENT_PAYLOAD: usize = std::mem::offset_of!(libc::input_event, type_);
 
@@ -65,34 +59,30 @@ impl Profile {
     }
 }
 
-pub(super) fn init(
-    event_loop: &mut EventLoop<'static, RuntimeState>,
+/// The scan `input_hotplug` runs, when this host has a wake gesture profile.
+pub(super) fn scan(
+    handle: &LoopHandle<'static, RuntimeState>,
     session: LibSeatSession,
-) -> Result<(), Box<dyn Error>> {
+) -> Option<Box<dyn FnMut()>> {
     let path = Path::new("/etc/denial/wake-gesture.json");
     if !path.exists() {
-        return Ok(());
+        return None;
     }
     let profile = match Profile::load(path) {
         Ok(p) => Rc::new(p),
         Err(error) => {
             warn!(%error, "wake gesture profile rejected");
-            return Ok(());
+            return None;
         }
     };
     let watched = Rc::new(RefCell::new(HashSet::new()));
-    let handle = event_loop.handle();
-    scan(&handle, &session, &watched, &profile);
-    event_loop
-        .handle()
-        .insert_source(Timer::from_duration(RESCAN), move |_, _, _| {
-            scan(&handle, &session, &watched, &profile);
-            TimeoutAction::ToDuration(RESCAN)
-        })?;
-    Ok(())
+    let handle = handle.clone();
+    Some(Box::new(move || {
+        scan_devices(&handle, &session, &watched, &profile)
+    }))
 }
 
-fn scan(
+fn scan_devices(
     handle: &LoopHandle<'static, RuntimeState>,
     session: &LibSeatSession,
     watched: &Rc<RefCell<HashSet<PathBuf>>>,

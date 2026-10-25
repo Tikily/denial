@@ -64,8 +64,6 @@ use super::ClientSurface;
 #[cfg(feature = "flutter")]
 use super::FlutterPointerPress;
 use super::WaylandFrontend;
-#[cfg(feature = "flutter")]
-use super::input_source::init_joystick_activity;
 use super::input_source::{InputBatchEvent, LibinputBatchSource};
 #[cfg(feature = "flutter")]
 use super::touch_gestures::{
@@ -1213,10 +1211,6 @@ pub(in super::super) fn init_libinput(
     session: LibSeatSession,
     seat_name: &str,
 ) -> Result<Libinput, Box<dyn Error>> {
-    #[cfg(feature = "flutter")]
-    init_joystick_activity(event_loop, session.clone())?;
-    #[cfg(feature = "flutter")]
-    super::wake_gesture::init(event_loop, session.clone())?;
     let mut context =
         Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(session.into());
     context
@@ -1258,6 +1252,8 @@ impl WaylandFrontend {
     }
 
     pub(in super::super) fn resume_input_session(&mut self) -> Result<(), &'static str> {
+        #[cfg(feature = "flutter")]
+        self.input_rescan.request();
         self.libinput
             .resume()
             .map_err(|()| "libinput rejected session resume")

@@ -166,6 +166,9 @@ mod input;
 #[cfg(feature = "flutter")]
 #[path = "wayland_frontend/input_deck.rs"]
 mod input_deck;
+#[cfg(feature = "flutter")]
+#[path = "wayland_frontend/input_hotplug.rs"]
+mod input_hotplug;
 #[path = "wayland_frontend/input_timestamps.rs"]
 mod input_timestamps;
 #[cfg(feature = "flutter")]
@@ -629,6 +632,8 @@ pub(super) struct WaylandFrontend {
     session: LibSeatSession,
     layer_shell_state: WlrLayerShellState,
     libinput: smithay::reexports::input::Libinput,
+    #[cfg(feature = "flutter")]
+    input_rescan: input_hotplug::InputRescan,
     pub(super) settings: SettingsManager,
     pub(super) shortcuts: ShortcutManager,
     pub(super) keyboard_layout_names: Vec<String>,
