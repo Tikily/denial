@@ -22,12 +22,13 @@ mod hints;
 mod placement;
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 #[cfg(feature = "flutter")]
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
-use std::sync::{Once, OnceLock};
+use std::sync::{Mutex, Once, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "flutter")]
@@ -46,10 +47,16 @@ const MAX_REGISTERED_PRIORITY_THREADS: usize = 8;
 /// How long the UI floor outlasts the last wanted frame, so content that
 /// updates at a steady pace below the refresh rate keeps it between frames.
 const UI_FLOOR_HOLD: Duration = Duration::from_millis(250);
+const PRIORITY_GUARD_INTERVAL: Duration = Duration::from_secs(5);
+/// Libraries name, place and lower a worker right after creating it, so the
+/// guard checks a thread until it is this old and never again after.
+const THREAD_SETTLE_AGE: Duration = Duration::from_secs(1);
 
 static INITIALIZE: Once = Once::new();
 
 static PRIORITY_GUARD_START: Once = Once::new();
+/// Live threads the guard checked once they were settled.
+static SETTLED_THREADS: Mutex<BTreeSet<libc::pid_t>> = Mutex::new(BTreeSet::new());
 static RTKIT: OnceLock<RtKitClient> = OnceLock::new();
 static SCHEDULING_ENABLED: AtomicBool = AtomicBool::new(false);
 static RT_PRIORITY: AtomicI32 = AtomicI32::new(0);
@@ -445,7 +452,7 @@ fn start_priority_guard() {
             .spawn(|| {
                 normalize_current_worker("priority-guard");
                 loop {
-                    std::thread::sleep(Duration::from_secs(1));
+                    std::thread::sleep(PRIORITY_GUARD_INTERVAL);
                     contain_unregistered_priority_threads();
                 }
             });
@@ -591,53 +598,91 @@ fn normalize_current_thread() -> io::Result<()> {
 /// registered compositor/Flutter thread set. This is a defense for native
 /// libraries whose internal pthreads inherit Linux scheduling attributes.
 pub(super) fn contain_unregistered_priority_threads() {
-    placement::reconcile();
-    if !SCHEDULING_ENABLED.load(Ordering::Acquire) {
-        return;
-    }
     let Ok(tasks) = fs::read_dir("/proc/self/task") else {
         return;
     };
-    for task in tasks.flatten() {
-        let Some(tid) = task
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<libc::pid_t>().ok())
-        else {
-            continue;
-        };
-        if is_registered_priority_thread(tid) {
-            continue;
+    let present = tasks
+        .flatten()
+        .filter_map(|task| task.file_name().to_str()?.parse::<libc::pid_t>().ok())
+        .collect::<BTreeSet<_>>();
+    let mut settled = SETTLED_THREADS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    settled.retain(|tid| present.contains(tid));
+    let due = present.difference(&settled).copied().collect::<Vec<_>>();
+    // Read the ages before the checks, so a thread counts as settled only if
+    // it already was when it was checked.
+    settled.extend(
+        due.iter()
+            .copied()
+            .filter(|tid| thread_age(*tid).is_some_and(|age| age >= THREAD_SETTLE_AGE)),
+    );
+    drop(settled);
+    placement::reconcile(&due);
+    if SCHEDULING_ENABLED.load(Ordering::Acquire) {
+        for tid in due {
+            contain_thread_priority(tid);
         }
-        let policy = scheduler_policy(tid).ok();
-        let realtime = policy.is_some_and(is_realtime_policy);
-        let elevated_nice = nice_for_tid(tid).is_ok_and(|nice| nice < 0);
-        if !realtime && !elevated_nice {
-            continue;
-        }
-        let scheduler_demoted = !realtime
-            || set_scheduler(
-                tid,
-                normal_policy_preserving_reset(policy.unwrap_or(libc::SCHED_OTHER)),
-                0,
-            )
-            .is_ok();
-        let nice_demoted = !elevated_nice || set_nice(tid, 0).is_ok();
-        if scheduler_demoted && nice_demoted {
-            warn!(
-                tid,
-                realtime,
-                elevated_nice,
-                "removed inherited CPU priority from an unregistered helper thread"
-            );
-        } else {
-            warn!(
-                tid,
-                realtime,
-                elevated_nice,
-                "could not remove inherited CPU priority from an unregistered helper thread"
-            );
-        }
+    }
+}
+
+fn thread_age(tid: libc::pid_t) -> Option<Duration> {
+    let stat = fs::read_to_string(format!("/proc/self/task/{tid}/stat")).ok()?;
+    // Field 22, start time in clock ticks since boot, counted after the
+    // parenthesized name, which may itself contain spaces.
+    let started: u64 = stat
+        .rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()?;
+    // SAFETY: sysconf has no pointer arguments.
+    let ticks = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: now is a valid timespec for the kernel to fill.
+    if ticks == 0 || unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut now) } != 0 {
+        return None;
+    }
+    let now = Duration::new(now.tv_sec as u64, now.tv_nsec as u32);
+    Some(now.saturating_sub(Duration::from_secs_f64(started as f64 / ticks as f64)))
+}
+
+fn contain_thread_priority(tid: libc::pid_t) {
+    if is_registered_priority_thread(tid) {
+        return;
+    }
+    let policy = scheduler_policy(tid).ok();
+    let realtime = policy.is_some_and(is_realtime_policy);
+    let elevated_nice = nice_for_tid(tid).is_ok_and(|nice| nice < 0);
+    if !realtime && !elevated_nice {
+        return;
+    }
+    let scheduler_demoted = !realtime
+        || set_scheduler(
+            tid,
+            normal_policy_preserving_reset(policy.unwrap_or(libc::SCHED_OTHER)),
+            0,
+        )
+        .is_ok();
+    let nice_demoted = !elevated_nice || set_nice(tid, 0).is_ok();
+    if scheduler_demoted && nice_demoted {
+        warn!(
+            tid,
+            realtime,
+            elevated_nice,
+            "removed inherited CPU priority from an unregistered helper thread"
+        );
+    } else {
+        warn!(
+            tid,
+            realtime,
+            elevated_nice,
+            "could not remove inherited CPU priority from an unregistered helper thread"
+        );
     }
 }
 
@@ -1093,6 +1138,14 @@ fn flag_value_enabled(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_thread_is_not_settled() {
+        let age = std::thread::spawn(|| thread_age(current_tid()))
+            .join()
+            .unwrap();
+        assert!(age.is_some_and(|age| age < THREAD_SETTLE_AGE));
+    }
 
     #[test]
     fn ui_floor_follows_frames_with_a_hold() {
