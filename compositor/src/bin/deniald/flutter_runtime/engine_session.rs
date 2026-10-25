@@ -637,6 +637,7 @@ impl FlutterRuntime {
             .engine()
             .send_platform_message(FLUTTER_LIFECYCLE_CHANNEL, state)?;
         self.outputs_visible = Some(visible);
+        crate::cpu_scheduling::outputs_visible(visible);
         info!(
             visible,
             lifecycle = std::str::from_utf8(state).unwrap_or("unknown"),

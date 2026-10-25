@@ -28,7 +28,7 @@ use std::io;
 #[cfg(feature = "flutter")]
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
-use std::sync::{Mutex, Once, OnceLock, PoisonError};
+use std::sync::{Condvar, Mutex, Once, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "flutter")]
@@ -53,6 +53,9 @@ const THREAD_SETTLE_AGE: Duration = Duration::from_secs(1);
 static INITIALIZE: Once = Once::new();
 
 static PRIORITY_GUARD_START: Once = Once::new();
+/// Whether any output is powered. The guard sleeps while none is, and checks
+/// the threads created meanwhile once one is powered on again.
+static OUTPUTS_VISIBLE: (Mutex<bool>, Condvar) = (Mutex::new(true), Condvar::new());
 /// Live threads the guard checked once they were settled.
 static SETTLED_THREADS: Mutex<BTreeSet<libc::pid_t>> = Mutex::new(BTreeSet::new());
 static RTKIT: OnceLock<RtKitClient> = OnceLock::new();
@@ -234,6 +237,13 @@ pub(super) fn focus_changed(pid: Option<libc::pid_t>) {
 /// The user produced an input event.
 pub(super) fn note_interaction() {
     hints::note_interaction();
+}
+
+/// Some output was powered on, or every output was powered off.
+pub(super) fn outputs_visible(visible: bool) {
+    let (state, changed) = &OUTPUTS_VISIBLE;
+    *state.lock().unwrap_or_else(PoisonError::into_inner) = visible;
+    changed.notify_all();
 }
 
 /// The shell started or stopped animating.
@@ -450,6 +460,15 @@ fn start_priority_guard() {
                 normalize_current_worker("priority-guard");
                 loop {
                     std::thread::sleep(PRIORITY_GUARD_INTERVAL);
+                    let (state, changed) = &OUTPUTS_VISIBLE;
+                    drop(
+                        changed
+                            .wait_while(
+                                state.lock().unwrap_or_else(PoisonError::into_inner),
+                                |visible| !*visible,
+                            )
+                            .unwrap_or_else(PoisonError::into_inner),
+                    );
                     contain_unregistered_priority_threads();
                 }
             });
