@@ -11,7 +11,7 @@ use denial_core::topology::OutputTransform;
 use futures_lite::{StreamExt, future};
 use smithay::reexports::calloop::channel::{Channel, Sender, channel};
 use tracing::{debug, info, warn};
-use zbus::blocking::{Connection, Proxy};
+use zbus::blocking::Proxy;
 
 const SENSOR_SERVICE: &str = "net.hadess.SensorProxy";
 const SENSOR_PATH: &str = "/net/hadess/SensorProxy";
@@ -129,7 +129,7 @@ enum Wake<C, O> {
 /// missing or failed sensor service is never polled: the worker sleeps until
 /// iio-sensor-proxy gains a new owner, which also covers a later udev start.
 fn monitor_bus(events: &Sender<Orientation>, published: &mut Option<Orientation>) -> MonitorResult {
-    let connection = match Connection::system() {
+    let connection = match crate::bus::blocking_system() {
         Ok(connection) => connection,
         Err(error) => return MonitorResult::Disconnected(error.to_string()),
     };

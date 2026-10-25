@@ -6,6 +6,8 @@ mod application_theming;
 #[cfg(feature = "flutter")]
 #[path = "deniald/authentication.rs"]
 mod authentication;
+#[path = "deniald/bus.rs"]
+mod bus;
 #[path = "deniald/client_release.rs"]
 mod client_release;
 #[path = "deniald/clipboard.rs"]

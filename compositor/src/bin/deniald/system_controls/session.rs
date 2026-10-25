@@ -54,7 +54,7 @@ pub(super) fn run_sleep_monitor(shared: Arc<SleepMonitorShared>) {
 }
 
 async fn monitor_sleep_transitions(shared: &Arc<SleepMonitorShared>) -> Result<(), String> {
-    let connection = zbus::Connection::system()
+    let connection = crate::bus::system()
         .await
         .map_err(|error| format!("could not connect to the system bus: {error}"))?;
     let manager = zbus::Proxy::new(

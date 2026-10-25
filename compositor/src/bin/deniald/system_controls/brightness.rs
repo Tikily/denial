@@ -162,7 +162,7 @@ struct BacklightWorker {
 
 impl BacklightWorker {
     fn start() -> Result<Self, String> {
-        let connection = zbus::blocking::Connection::system()
+        let connection = crate::bus::blocking_system()
             .map_err(|error| format!("could not connect to logind: {error}"))?;
         let mut worker = Self {
             connection,

@@ -25,10 +25,7 @@ pub(super) fn run_worker(shared: &Arc<SharedAuthentication>) {
     future::block_on(async {
         while !stopping(shared) {
             let result = async {
-                let connection = zbus::connection::Builder::system()?
-                    .method_timeout(Duration::from_secs(3))
-                    .build()
-                    .await?;
+                let connection = crate::bus::system().await?;
                 monitor(&connection, shared).await
             }
             .await;

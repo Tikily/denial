@@ -34,13 +34,11 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "flutter")]
 use denial_flutter_engine::sys;
 use tracing::{debug, info, warn};
-use zbus::blocking::connection::Builder as ConnectionBuilder;
 use zbus::blocking::{Connection, Proxy};
 
 const RTKIT_SERVICE: &str = "org.freedesktop.RealtimeKit1";
 const RTKIT_OBJECT: &str = "/org/freedesktop/RealtimeKit1";
 const RTKIT_INTERFACE: &str = "org.freedesktop.RealtimeKit1";
-const RTKIT_DBUS_TIMEOUT: Duration = Duration::from_secs(2);
 const DEFAULT_RT_TIME_SOFT_US: libc::rlim_t = 200_000;
 const PREFERRED_NICE_LEVEL: libc::c_int = -10;
 const MAX_REGISTERED_PRIORITY_THREADS: usize = 8;
@@ -166,10 +164,9 @@ struct RtKitClient {
 
 impl RtKitClient {
     fn connect() -> zbus::Result<Self> {
-        let connection = ConnectionBuilder::system()?
-            .method_timeout(RTKIT_DBUS_TIMEOUT)
-            .build()?;
-        Ok(Self { connection })
+        Ok(Self {
+            connection: crate::bus::blocking_system()?,
+        })
     }
 
     fn minimum_nice_level(&self) -> zbus::Result<libc::c_int> {
