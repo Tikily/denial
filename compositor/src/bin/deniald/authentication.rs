@@ -873,6 +873,8 @@ struct SharedAuthentication {
     changed: crate::wakeup::Wakeup,
     /// Wakes the lock-capability worker to stop.
     capability_stop: crate::wakeup::Wakeup,
+    /// Wakes a listening fingerprint scan to recheck its cancellation.
+    fingerprint_changed: crate::wakeup::Wakeup,
     events: Mutex<VecDeque<AuthenticationEvent>>,
 }
 
@@ -880,6 +882,7 @@ impl SharedAuthentication {
     fn notify(&self) {
         self.condition.notify_all();
         self.changed.wake();
+        self.fingerprint_changed.wake();
     }
 
     fn push_event(&self, event: AuthenticationEvent) {
@@ -959,6 +962,7 @@ impl AuthenticationController {
             fingerprint_unlock_pending: AtomicBool::new(false),
             changed: crate::wakeup::Wakeup::new()?,
             capability_stop: crate::wakeup::Wakeup::new()?,
+            fingerprint_changed: crate::wakeup::Wakeup::new()?,
             state: Mutex::new(AuthenticationState {
                 stopping: false,
                 busy: false,

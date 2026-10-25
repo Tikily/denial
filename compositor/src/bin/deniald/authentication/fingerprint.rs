@@ -6,8 +6,9 @@
 //! claim if a daemon disappears or a method times out during cleanup.
 
 use super::*;
-use std::cell::Cell;
+use crate::wakeup::Wakeup;
 use futures_lite::{StreamExt, future};
+use std::cell::Cell;
 use tracing::debug;
 use zbus::blocking::{Connection, Proxy, connection::Builder};
 use zbus::zvariant::OwnedObjectPath;
@@ -16,7 +17,6 @@ const SERVICE: &str = "net.reactivated.Fprint";
 const MANAGER: &str = "/net/reactivated/Fprint/Manager";
 const DEVICE_INTERFACE: &str = "net.reactivated.Fprint.Device";
 const CALL_TIMEOUT: Duration = Duration::from_secs(3);
-const CANCEL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_UNAVAILABLE_RETRY: Duration = Duration::from_secs(30);
 const WAKE_SETTLE_DELAY: Duration = Duration::from_millis(150);
 /// A reader that listened this long before failing worked; it was the scan.
@@ -39,17 +39,28 @@ pub(super) enum Verification {
 
 pub(super) trait FingerprintBackend {
     /// Match includes successful PAM account validation, not just a scan.
-    /// `armed` runs once the reader is listening for a finger.
-    fn verify(&mut self, armed: &dyn Fn(), cancelled: &dyn Fn() -> bool) -> Verification;
+    /// `armed` runs once the reader is listening for a finger. `changed`
+    /// wakes whenever the inputs of `cancelled` may have changed.
+    fn verify(
+        &mut self,
+        armed: &dyn Fn(),
+        cancelled: &dyn Fn() -> bool,
+        changed: &Wakeup,
+    ) -> Verification;
 }
 
 pub(super) struct FprintBackend;
 
 impl FingerprintBackend for FprintBackend {
-    fn verify(&mut self, armed: &dyn Fn(), cancelled: &dyn Fn() -> bool) -> Verification {
+    fn verify(
+        &mut self,
+        armed: &dyn Fn(),
+        cancelled: &dyn Fn() -> bool,
+        changed: &Wakeup,
+    ) -> Verification {
         let result = (|| {
             let connection = Builder::system()?.method_timeout(CALL_TIMEOUT).build()?;
-            let result = verify_connection(&connection, armed, cancelled);
+            let result = verify_connection(&connection, armed, cancelled, changed);
             // A separate connection per operation prevents old signals from
             // crossing a retry and ensures any abandoned claim is released.
             let _ = connection.close();
@@ -78,6 +89,7 @@ fn verify_connection(
     connection: &Connection,
     armed: &dyn Fn(),
     cancelled: &dyn Fn() -> bool,
+    changed: &Wakeup,
 ) -> zbus::Result<Verification> {
     if cancelled() {
         return Ok(Verification::Cancelled);
@@ -117,7 +129,7 @@ fn verify_connection(
             continue;
         }
         device.call::<_, _, ()>("Claim", &("",))?;
-        let result = verify_claimed_device(&device, armed, cancelled);
+        let result = verify_claimed_device(&device, armed, cancelled, changed);
         // Always stop/release, including cancellation, no-match, malformed
         // signals and VerifyStart failure. Connection close is the fallback.
         let _ = device.call::<_, _, ()>("VerifyStop", &());
@@ -131,6 +143,7 @@ fn verify_claimed_device(
     device: &Proxy<'_>,
     armed: &dyn Fn(),
     cancelled: &dyn Fn() -> bool,
+    changed: &Wakeup,
 ) -> zbus::Result<Verification> {
     // Subscribe before starting, to retain even an immediate match. The proxy
     // filters sender, object path, interface and member against the pinned owner.
@@ -152,7 +165,7 @@ fn verify_claimed_device(
                 Some(None)
             }),
             async {
-                async_io::Timer::after(CANCEL_INTERVAL).await;
+                changed.wait().await;
                 None
             },
         ));
@@ -232,6 +245,7 @@ pub(super) fn run_worker(
                 publish_readiness(shared, true);
             },
             &|| cancelled(shared, epoch),
+            &shared.fingerprint_changed,
         );
         // Between scans the reader is not listening; the lock screen shows
         // that until the next attempt arms it.
@@ -624,7 +638,12 @@ mod tests {
     }
 
     impl FingerprintBackend for ControlledBackend {
-        fn verify(&mut self, _armed: &dyn Fn(), cancelled: &dyn Fn() -> bool) -> Verification {
+        fn verify(
+            &mut self,
+            _armed: &dyn Fn(),
+            cancelled: &dyn Fn() -> bool,
+            _changed: &Wakeup,
+        ) -> Verification {
             self.started.send(()).unwrap();
             loop {
                 if cancelled() {
@@ -904,8 +923,21 @@ mod tests {
                 .build()
                 .unwrap();
             let start = Instant::now();
-            let result = verify_connection(&client, &|| {}, &|| {
-                signal == "silent" && start.elapsed() > Duration::from_millis(200)
+            let changed = Wakeup::new().unwrap();
+            // A cancellation always comes with a wake, as SharedAuthentication::notify sends.
+            let result = thread::scope(|scope| {
+                if signal == "silent" {
+                    scope.spawn(|| {
+                        thread::sleep(Duration::from_millis(250));
+                        changed.wake();
+                    });
+                }
+                verify_connection(
+                    &client,
+                    &|| {},
+                    &|| signal == "silent" && start.elapsed() > Duration::from_millis(200),
+                    &changed,
+                )
             });
             match expected {
                 Some(expected) => assert_eq!(result.unwrap(), expected),
@@ -923,7 +955,8 @@ mod tests {
                 .method_timeout(CALL_TIMEOUT)
                 .build()
                 .unwrap();
-            let result = verify_connection(&client, &|| {}, &|| false);
+            let changed = Wakeup::new().unwrap();
+            let result = verify_connection(&client, &|| {}, &|| false, &changed);
             client.close().unwrap();
             finished.send(result).unwrap();
         });
