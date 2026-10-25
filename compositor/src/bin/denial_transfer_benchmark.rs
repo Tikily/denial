@@ -1,4 +1,8 @@
 //! Render-node-only, offscreen paced transfer probe. Never opens a KMS device.
+// cpu_scheduling reaches RTKit over the shared bus; the probe never calls it.
+#[allow(dead_code)]
+#[path = "deniald/bus.rs"]
+mod bus;
 #[path = "deniald/cpu_scheduling.rs"]
 mod cpu_scheduling;
 #[path = "deniald/egl_context.rs"]
