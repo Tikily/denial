@@ -172,20 +172,13 @@ pub(super) fn synchronize_flutter_input_layout(
     let Some(layout) = runtime.take_input_layout_update() else {
         return Ok(());
     };
-    if events.wayland.is_none() {
-        runtime.recycle_input_layout(layout);
-        return Ok(());
-    }
     let next_shell_capture = layout.keyboard_capture() || layout.exclusive_shell();
     let previous_shell_capture = events.frontend().shell_captures_keyboard();
     if next_shell_capture && !previous_shell_capture {
         wayland_frontend::suspend_keyboard_focus_for_shell(events);
     }
-    let frontend = events
-        .wayland
-        .as_mut()
-        .expect("checked Wayland frontend disappeared");
-    let (previous, sampling_changed, routing_changed) = frontend.install_input_layout(layout);
+    let (previous, sampling_changed, routing_changed) =
+        events.frontend_mut().install_input_layout(layout);
     let first_generation_layout = previous.is_none();
     if let Some(previous) = previous {
         runtime.recycle_input_layout(previous);
@@ -215,29 +208,16 @@ pub(super) fn synchronize_wayland_cursor(
     runtime: &mut flutter_runtime::FlutterRuntime,
     events: &mut RuntimeState,
 ) -> Result<(), Box<dyn Error>> {
-    if let Some(shape) = runtime.take_mouse_cursor_request()
-        && let Some(frontend) = events.wayland.as_mut()
-    {
+    let frontend = events.frontend_mut();
+    if let Some(shape) = runtime.take_mouse_cursor_request() {
         frontend.request_flutter_cursor_shape(shape);
     }
-    let (publication, position, output) =
-        events
-            .wayland
-            .as_mut()
-            .map_or((None, None, None), |frontend| {
-                (
-                    frontend.take_cursor_state_update(),
-                    frontend.take_cursor_position_update(),
-                    frontend.cursor_output_id(),
-                )
-            });
+    let publication = frontend.take_cursor_state_update();
+    let position = frontend.take_cursor_position_update();
+    let output = frontend.cursor_output_id();
     runtime.set_cursor_output(output);
     if let Some(publication) = publication {
-        let (state, textures) = events
-            .wayland
-            .as_mut()
-            .expect("cursor publication has no Wayland frontend")
-            .flutter_cursor_state(publication);
+        let (state, textures) = frontend.flutter_cursor_state(publication);
         // FlutterRuntime assigns the monotonic cursor epoch only after it has
         // installed the associated texture set. Validate the compositor-owned
         // payload here without rejecting that intentionally unassigned epoch;
@@ -250,30 +230,14 @@ pub(super) fn synchronize_wayland_cursor(
                 textures = textures.len(),
                 "dropping invalid cursor wire payload"
             );
-            events
-                .wayland
-                .as_mut()
-                .expect("rejected cursor publication lost its Wayland frontend")
-                .recycle_flutter_cursor_state(state, textures);
+            frontend.recycle_flutter_cursor_state(state, textures);
             return Ok(());
         }
         let (state, textures) = runtime.sync_cursor_state(state, textures, output)?;
-        events
-            .wayland
-            .as_mut()
-            .expect("cursor publication lost its Wayland frontend")
-            .recycle_flutter_cursor_state(state, textures);
-    } else if let Some(textures) = events
-        .wayland
-        .as_mut()
-        .and_then(wayland_frontend::WaylandFrontend::take_cursor_buffer_updates)
-    {
+        frontend.recycle_flutter_cursor_state(state, textures);
+    } else if let Some(textures) = frontend.take_cursor_buffer_updates() {
         let textures = runtime.sync_cursor_buffers(textures)?;
-        events
-            .wayland
-            .as_mut()
-            .expect("cursor buffer update lost its Wayland frontend")
-            .recycle_cursor_buffer_updates(textures);
+        frontend.recycle_cursor_buffer_updates(textures);
     }
     if let Some((x, y)) = position {
         runtime.send_cursor_position(x, y)?;
