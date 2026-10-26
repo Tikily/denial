@@ -16,7 +16,8 @@ pub(in super::super) fn snapshot(state: &RuntimeState) -> Snapshot {
         return Snapshot::default();
     };
     let touch_outputs = state
-        .touchscreen_devices
+        .input_devices
+        .touchscreens
         .values()
         .filter_map(|device| input::touch_output_for_device(frontend, device))
         .filter(|output| output.powered)

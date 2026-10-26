@@ -305,7 +305,8 @@ pub(super) fn synchronize_gamma_control(
 ) -> Vec<SoftwareDimmingState> {
     #[cfg(feature = "flutter")]
     let pending_controls = events
-        .pending_software_dimming
+        .control
+        .software_dimming
         .drain(..)
         .map(PendingSoftwareDimming::into_parts)
         .collect::<Vec<_>>();

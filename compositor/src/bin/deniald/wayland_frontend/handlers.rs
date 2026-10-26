@@ -1711,7 +1711,7 @@ impl SeatHandler for RuntimeState {
         led_state: smithay::input::keyboard::LedState,
     ) {
         let leds = led_state.into();
-        for device in self.keyboard_devices.values_mut() {
+        for device in self.input_devices.keyboards.values_mut() {
             device.led_update(leds);
         }
     }
@@ -1995,7 +1995,8 @@ impl XdgShellHandler for RuntimeState {
         );
         #[cfg(feature = "flutter")]
         if let Some(window_id) = initial_activation {
-            self.pending_window_events
+            self.window_events
+                .pending
                 .push(PendingWindowEvent::Activated(window_id));
         }
         #[cfg(not(feature = "flutter"))]

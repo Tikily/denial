@@ -112,7 +112,7 @@ pub(super) fn synchronize_system_control_events(
     let Some(controls) = events.system_controls.as_ref() else {
         runtime.drain_audio_requests().for_each(drop);
         runtime.drain_brightness_requests().for_each(drop);
-        while let Some(request) = events.pending_system_controls.pop_front() {
+        while let Some(request) = events.control.system.pop_front() {
             let (_, reply) = request.into_parts();
             let _ = reply.send(Err(OutputControlFailure::new(
                 "unavailable",
@@ -124,7 +124,7 @@ pub(super) fn synchronize_system_control_events(
     if events.secure_session_locked() {
         runtime.drain_audio_requests().for_each(drop);
         runtime.drain_brightness_requests().for_each(drop);
-        while let Some(request) = events.pending_system_controls.pop_front() {
+        while let Some(request) = events.control.system.pop_front() {
             let (_, reply) = request.into_parts();
             let _ = reply.send(Err(OutputControlFailure::new(
                 "locked",
@@ -138,7 +138,7 @@ pub(super) fn synchronize_system_control_events(
         for request in runtime.drain_brightness_requests() {
             controls.handle_brightness_request(request);
         }
-        while let Some(request) = events.pending_system_controls.pop_front() {
+        while let Some(request) = events.control.system.pop_front() {
             let (command, reply) = request.into_parts();
             let (accepted, wait) = match command {
                 SystemControlCommand::Audio(request) => {
@@ -175,14 +175,15 @@ pub(super) fn synchronize_system_control_events(
                 )));
             } else if let Some(kind) = wait {
                 const MAX_PENDING_SYSTEM_CONTROL_WAITS: usize = 64;
-                if events.pending_system_control_waits.len() >= MAX_PENDING_SYSTEM_CONTROL_WAITS {
+                if events.control.system_waits.len() >= MAX_PENDING_SYSTEM_CONTROL_WAITS {
                     let _ = reply.send(Err(OutputControlFailure::new(
                         "busy",
                         "too many system-control reads are pending",
                     )));
                 } else {
                     events
-                        .pending_system_control_waits
+                        .control
+                        .system_waits
                         .push_back(PendingSystemControlWait::new(kind, reply));
                 }
             } else {
@@ -192,7 +193,7 @@ pub(super) fn synchronize_system_control_events(
     }
     if controls.take_event_signal() {
         while let Some(event) = controls.try_event() {
-            resolve_system_control_waits(&mut events.pending_system_control_waits, &event);
+            resolve_system_control_waits(&mut events.control.system_waits, &event);
             runtime.send_system_control_event(&event)?;
         }
     }
@@ -202,9 +203,9 @@ pub(super) fn synchronize_system_control_events(
 #[cfg(feature = "flutter")]
 fn expire_system_control_waits(events: &mut RuntimeState) {
     let now = Instant::now();
-    let pending = events.pending_system_control_waits.len();
+    let pending = events.control.system_waits.len();
     for _ in 0..pending {
-        let Some(wait) = events.pending_system_control_waits.pop_front() else {
+        let Some(wait) = events.control.system_waits.pop_front() else {
             break;
         };
         if wait.expired(now) {
@@ -213,7 +214,7 @@ fn expire_system_control_waits(events: &mut RuntimeState) {
                 "the native system-control worker did not answer in time",
             )));
         } else {
-            events.pending_system_control_waits.push_back(wait);
+            events.control.system_waits.push_back(wait);
         }
     }
 }

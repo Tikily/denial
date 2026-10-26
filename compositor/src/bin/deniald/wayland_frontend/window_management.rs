@@ -256,7 +256,8 @@ pub(super) fn activate_window(
     if let Some(window_id) = window_id {
         state.frontend_mut().record_workspace_focus(window_id);
         state
-            .pending_window_events
+            .window_events
+            .pending
             .push_activation(window_id, resumed);
     }
     state.scene_sync.mark_dirty();
@@ -1090,7 +1091,8 @@ fn restore_minimized_window_for_move(state: &mut RuntimeState, window_id: u64) {
         managed.prepare_minimized(false, frontend.windows_covered());
     }
     state
-        .pending_window_events
+        .window_events
+        .pending
         .push(PendingWindowEvent::Action(window_id, WindowAction::Restore));
 }
 
@@ -1178,7 +1180,8 @@ pub(super) fn activate_local_flutter_window(state: &mut RuntimeState, window_id:
     deactivate_client_windows(state.frontend_mut());
     clear_keyboard_focus(state, &keyboard, SERIAL_COUNTER.next_serial());
     state
-        .pending_window_events
+        .window_events
+        .pending
         .push(PendingWindowEvent::Activated(window_id));
     state.scene_sync.mark_dirty();
     true
@@ -1207,7 +1210,8 @@ pub(in super::super) fn queue_local_flutter_window_placement(
         .and_then(|frontend| frontend.local_flutter_window_placement(window_id, phase, change));
     if let Some(placement) = placement {
         state
-            .pending_window_events
+            .window_events
+            .pending
             .push(PendingWindowEvent::Placement(placement));
     }
 }
@@ -1326,7 +1330,8 @@ fn queue_window_placement_for_monitor_with_persistence(
             .remember_window_geometry(window, geometry);
     }
     state
-        .pending_window_events
+        .window_events
+        .pending
         .push(PendingWindowEvent::Placement(placement));
 }
 
@@ -1369,7 +1374,8 @@ pub(super) fn queue_window_action_for_window(
     });
     if let Some(window_id) = window_id {
         state
-            .pending_window_events
+            .window_events
+            .pending
             .push(PendingWindowEvent::Action(window_id, action));
     }
 }
@@ -1634,7 +1640,8 @@ pub(super) fn focused_workspace_window(state: &RuntimeState) -> Option<(u64, i64
 #[cfg(feature = "flutter")]
 fn queue_local_window_action(state: &mut RuntimeState, window_id: u64, action: WindowAction) {
     state
-        .pending_window_events
+        .window_events
+        .pending
         .push(PendingWindowEvent::Action(window_id, action));
     state.scene_sync.mark_dirty();
 }

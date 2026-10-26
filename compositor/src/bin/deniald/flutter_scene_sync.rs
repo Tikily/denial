@@ -75,7 +75,7 @@ pub(super) fn synchronize_flutter_scene(
     // Building the live-ID set walks every toplevel. It is only needed to
     // classify events which arrived before their first renderable buffer;
     // the steady-state scene publication normally has none.
-    let live_window_ids = (!events.pending_unpublished_window_events.is_empty()).then(|| {
+    let live_window_ids = (!events.window_events.unpublished.is_empty()).then(|| {
         events
             .wayland
             .as_ref()
@@ -105,19 +105,20 @@ pub(super) fn synchronize_flutter_scene(
             .wayland
             .as_ref()
             .map_or(&[], |frontend| frontend.kept_texture_ids()),
-        &events.restored_window_ids,
+        &events.window_events.restored_ids,
     )?;
     output_control.publish_wallpaper(runtime.published_window_descriptions());
     if window_snapshot_changed {
         // Buffer-only commits take the texture-source fast path above. Rehash
         // IDs only after accepting a new authoritative metadata revision.
-        let mut published_window_ids = std::mem::take(&mut events.published_window_ids);
+        let mut published_window_ids = std::mem::take(&mut events.window_events.published_ids);
         published_window_ids.clear();
         published_window_ids.extend(runtime.synced_window_ids());
-        events.published_window_ids = published_window_ids;
-        let published_window_ids = &events.published_window_ids;
+        events.window_events.published_ids = published_window_ids;
+        let published_window_ids = &events.window_events.published_ids;
         events
-            .restored_window_ids
+            .window_events
+            .restored_ids
             .retain(|window_id| published_window_ids.contains(window_id));
     }
     events
@@ -129,16 +130,19 @@ pub(super) fn synchronize_flutter_scene(
     events
         .scene_sync
         .mark_metadata_synchronized(revision, buffer_revision);
-    if events.pending_unpublished_window_events.is_empty() {
+    if events.window_events.unpublished.is_empty() {
         return Ok(());
     }
     // Events for a freshly mapped window were deferred because Dart could not
     // resolve that ID before this snapshot. Preserve their FIFO order and
     // discard only windows that disappeared before they were ever published.
-    let mut unpublished = events.pending_unpublished_window_events.drain_events();
+    let mut unpublished = events.window_events.unpublished.drain_events();
     for event in unpublished.drain(..) {
         match window_event_disposition(
-            events.published_window_ids.contains(&event.window_id()),
+            events
+                .window_events
+                .published_ids
+                .contains(&event.window_id()),
             live_window_ids
                 .as_ref()
                 .is_some_and(|window_ids| window_ids.contains(&event.window_id())),
@@ -148,13 +152,14 @@ pub(super) fn synchronize_flutter_scene(
             // buffer yet. Keep its ordered events until a later commit makes
             // it publishable; discard only IDs that are no longer alive.
             WindowEventDisposition::Retain => {
-                events.pending_unpublished_window_events.push(event);
+                events.window_events.unpublished.push(event);
             }
             WindowEventDisposition::Drop => {}
         }
     }
     events
-        .pending_unpublished_window_events
+        .window_events
+        .unpublished
         .recycle_drained(unpublished);
     Ok(())
 }

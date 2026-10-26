@@ -682,7 +682,8 @@ fn map_x11_window(state: &mut RuntimeState, surface: X11Surface, override_redire
                 .and_then(|root| frontend.surface_id(&root))
         }) {
             state
-                .pending_window_events
+                .window_events
+                .pending
                 .push(PendingWindowEvent::Activated(window_id));
         }
     }
@@ -763,7 +764,8 @@ fn unmap_x11_window(state: &mut RuntimeState, surface: &X11Surface) {
         #[cfg(feature = "flutter")]
         if let Some(window_id) = next_window_id {
             state
-                .pending_window_events
+                .window_events
+                .pending
                 .push(PendingWindowEvent::Activated(window_id));
         }
     }
@@ -818,7 +820,8 @@ impl XWaylandShellHandler for RuntimeState {
         );
         #[cfg(feature = "flutter")]
         if focused {
-            self.pending_window_events
+            self.window_events
+                .pending
                 .push(PendingWindowEvent::Activated(stable_id));
         }
         #[cfg(not(feature = "flutter"))]

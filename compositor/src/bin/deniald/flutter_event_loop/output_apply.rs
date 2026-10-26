@@ -149,7 +149,7 @@ impl Session<'_, '_> {
             ..
         } = self;
         let mut handled = false;
-        while let Some(request) = events.pending_output_confirmations.pop_front() {
+        while let Some(request) = events.control.output_confirmations.pop_front() {
             let Some(pending) = active_confirmation.take() else {
                 request.reply(Err(output_control::OutputControlFailure::new(
                     "stale_confirmation",
@@ -375,12 +375,12 @@ impl Session<'_, '_> {
         if scanout_rebased && let Some((request, _)) = self.ready_output_apply.take() {
             // A VT resume invalidates the scheduler and any connector view
             // prepared against it. Re-scan the request after topology repair.
-            self.events.pending_output_applies.push_front(request);
+            self.events.control.output_applies.push_front(request);
         }
         if scanout_rebased || self.ready_output_apply.is_some() {
             return Ok(false);
         }
-        let Some(request) = self.events.pending_output_applies.pop_front() else {
+        let Some(request) = self.events.control.output_applies.pop_front() else {
             return Ok(false);
         };
         if self.active_output_confirmation.is_some() {
@@ -391,7 +391,7 @@ impl Session<'_, '_> {
             return Ok(true);
         }
         if self.scheduler.has_pending_scanout_work() {
-            self.events.pending_output_applies.push_front(request);
+            self.events.control.output_applies.push_front(request);
             self.drain_frames_before_reconfiguration()?;
             return Ok(true);
         }

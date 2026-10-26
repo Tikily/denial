@@ -724,43 +724,7 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
             .handle()
             .insert_source(source, |event, _, state: &mut RuntimeState| {
                 if let ChannelEvent::Msg(request) = event {
-                    match request {
-                        ControlEvent::OutputApply(request) => {
-                            state.pending_output_applies.push_back(request);
-                        }
-                        ControlEvent::OutputConfirmation(request) => {
-                            state.pending_output_confirmations.push_back(request);
-                        }
-                        ControlEvent::Shell(request) => {
-                            let result = if state.secure_session_locked() {
-                                Err(OutputControlFailure::new(
-                                    "locked",
-                                    "shell commands are unavailable while the secure session is locked",
-                                ))
-                            } else {
-                                match request.command {
-                                    ShellControlCommand::OpenWallpaper => state.queue_shell_action(
-                                        wire::ShellAction::Wallpaper,
-                                        None,
-                                    ),
-                                }
-                                Ok(())
-                            };
-                            request.reply(result);
-                        }
-                        ControlEvent::Settings(request) => {
-                            state.pending_settings_controls.push_back(request);
-                        }
-                        ControlEvent::SystemControl(request) => {
-                            state.pending_system_controls.push_back(request);
-                        }
-                        ControlEvent::SoftwareDimming(request) => {
-                            state.pending_software_dimming.push_back(request);
-                        }
-                        ControlEvent::UiDevelopment(request) => {
-                            state.pending_ui_development.push_back(request);
-                        }
-                    }
+                    state.receive_control(request);
                 }
             })?;
         Some(server)

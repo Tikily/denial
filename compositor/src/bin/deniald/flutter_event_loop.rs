@@ -89,7 +89,7 @@ fn interactive_service_work_pending(events: &RuntimeState) -> bool {
     !events.plugin_actions.pending.is_empty()
         || !events.pending_shell_actions.is_empty()
         || !events.pending_shortcut_launches.is_empty()
-        || !events.pending_window_events.is_empty()
+        || !events.window_events.pending.is_empty()
 }
 
 fn output_transaction_waiting(
@@ -335,7 +335,7 @@ impl Session<'_, '_> {
             flutter_launcher,
             ..
         } = self;
-        while let Some(request) = events.pending_ui_development.pop_front() {
+        while let Some(request) = events.control.ui_development.pop_front() {
             let runtime = &mut **flutter;
             let is_query = request.command.kind() == ui_development::CommandKind::Query;
             let (reload_requested, state) =
@@ -410,7 +410,8 @@ impl Session<'_, '_> {
         timeout = events.idle_policy.limit_dispatch_timeout(now, timeout);
         timeout = events.dpms_topology.limit_dispatch_timeout(now, timeout);
         if let Some(expiry) = events
-            .pending_system_control_waits
+            .control
+            .system_waits
             .iter()
             .map(PendingSystemControlWait::expires_at)
             .min()

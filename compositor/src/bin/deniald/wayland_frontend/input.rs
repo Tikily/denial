@@ -1408,7 +1408,7 @@ pub(in super::super) fn install_mouse_settings(
     state: &mut RuntimeState,
     settings: &MouseSettings,
 ) -> Result<(), String> {
-    for device in state.mouse_devices.values_mut() {
+    for device in state.input_devices.mice.values_mut() {
         configure_mouse_device(device, settings)?;
     }
     Ok(())
@@ -1419,15 +1419,10 @@ pub(in super::super) fn install_touchpad_settings(
     state: &mut RuntimeState,
     settings: &TouchpadSettings,
 ) -> Result<(), String> {
-    for device in state.touchpad_devices.values_mut() {
+    for device in state.input_devices.touchpads.values_mut() {
         configure_touchpad_device(device, settings)?;
     }
     Ok(())
-}
-
-#[cfg(feature = "flutter")]
-fn device_presence_changed(previous_count: usize, current_count: usize) -> bool {
-    (previous_count == 0) != (current_count == 0)
 }
 
 #[cfg(feature = "flutter")]
@@ -1668,12 +1663,15 @@ fn process_input_event(
     mut event: InputEvent<LibinputInputBackend>,
 ) -> bool {
     let mut tablet_clients_changed = false;
+    #[cfg(feature = "flutter")]
+    let pointer_kinds = state.input_devices.pointer_kinds();
     if let InputEvent::DeviceAdded { device } = &mut event {
         tablet_clients_changed = tablet::register_device(state, device);
         #[cfg(feature = "flutter")]
         if Device::has_capability(device, DeviceCapability::Touch) {
             state
-                .touchscreen_devices
+                .input_devices
+                .touchscreens
                 .insert(device.sysname().to_owned(), device.clone());
         }
         if Device::has_capability(device, DeviceCapability::Keyboard) {
@@ -1686,7 +1684,8 @@ fn process_input_event(
                 device.led_update(led_state.into());
             }
             state
-                .keyboard_devices
+                .input_devices
+                .keyboards
                 .insert(device.sysname().to_owned(), device.clone());
         }
         let touchpad = is_touchpad_device(device);
@@ -1704,14 +1703,10 @@ fn process_input_event(
                 warn!(%error, "could not apply persisted touchpad settings");
             }
             #[cfg(feature = "flutter")]
-            {
-                let previous_count = state.touchpad_devices.len();
-                state
-                    .touchpad_devices
-                    .insert(device.sysname().to_owned(), device.clone());
-                state.input_device_capabilities_changed |=
-                    device_presence_changed(previous_count, state.touchpad_devices.len());
-            }
+            state
+                .input_devices
+                .touchpads
+                .insert(device.sysname().to_owned(), device.clone());
         }
         let mouse = is_mouse_device(device);
         if mouse {
@@ -1724,14 +1719,15 @@ fn process_input_event(
                 warn!(%error, "could not apply persisted mouse settings");
             }
             #[cfg(feature = "flutter")]
-            {
-                let previous_count = state.mouse_devices.len();
-                state
-                    .mouse_devices
-                    .insert(device.sysname().to_owned(), device.clone());
-                state.input_device_capabilities_changed |=
-                    device_presence_changed(previous_count, state.mouse_devices.len());
-            }
+            state
+                .input_devices
+                .mice
+                .insert(device.sysname().to_owned(), device.clone());
+        }
+        #[cfg(feature = "flutter")]
+        {
+            state.input_device_capabilities_changed |=
+                state.input_devices.pointer_kinds() != pointer_kinds;
         }
     }
 
@@ -1739,24 +1735,12 @@ fn process_input_event(
         #[cfg(feature = "flutter")]
         state.power_button.remove_device(device.sysname());
         tablet_clients_changed = tablet::unregister_device(state, device);
+        state.input_devices.remove(device.sysname());
         #[cfg(feature = "flutter")]
         {
-            state.touchscreen_devices.remove(device.sysname());
             state.screen_off_touch.remove_device(device.sysname());
-        }
-        if Device::has_capability(device, DeviceCapability::Keyboard) {
-            state.keyboard_devices.remove(device.sysname());
-        }
-        #[cfg(feature = "flutter")]
-        {
-            let previous_count = state.touchpad_devices.len();
-            state.touchpad_devices.remove(device.sysname());
             state.input_device_capabilities_changed |=
-                device_presence_changed(previous_count, state.touchpad_devices.len());
-            let previous_count = state.mouse_devices.len();
-            state.mouse_devices.remove(device.sysname());
-            state.input_device_capabilities_changed |=
-                device_presence_changed(previous_count, state.mouse_devices.len());
+                state.input_devices.pointer_kinds() != pointer_kinds;
         }
         let reset = InputDeviceReset {
             keyboard: Device::has_capability(device, DeviceCapability::Keyboard),

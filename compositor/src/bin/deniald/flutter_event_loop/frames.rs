@@ -97,7 +97,7 @@ impl Session<'_, '_> {
         let external_changes_pending = events.frontend().has_pending_gamma_changes();
         if !gamma_work_pending(
             topology_changed,
-            !requests.is_empty() || !events.pending_software_dimming.is_empty(),
+            !requests.is_empty() || !events.control.software_dimming.is_empty(),
             external_changes_pending,
             events.gamma_reapply_requested || events.scanout_rebased,
         ) {
@@ -273,7 +273,7 @@ impl Session<'_, '_> {
 
         let transaction_waiting = output_transaction_waiting(
             ready_output_apply,
-            !events.pending_output_applies.is_empty(),
+            !events.control.output_applies.is_empty(),
             events.resident_geometry_reconfigure_requested,
         );
         if transaction_waiting || frame_limit.is_some_and(|limit| raster_frames >= limit) {

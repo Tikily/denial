@@ -74,25 +74,27 @@ pub(super) fn synchronize_flutter_window_management(
     }
     // Also drain here when handing off or replacing the Flutter runtime.
     synchronize_flutter_window_commands(runtime, events)?;
-    if events.pending_window_events.is_empty() {
+    if events.window_events.pending.is_empty() {
         return Ok(());
     }
-    let mut pending = events.pending_window_events.drain_events();
+    let mut pending = events.window_events.pending.drain_events();
     for event in pending.drain(..) {
         if event.is_activation() {
             // Window focus is last-writer-wins. An activation waiting for an
             // older, bufferless window must not fire after focus moved away.
-            events
-                .pending_unpublished_window_events
-                .remove_activations();
+            events.window_events.unpublished.remove_activations();
         }
-        if events.published_window_ids.contains(&event.window_id()) {
+        if events
+            .window_events
+            .published_ids
+            .contains(&event.window_id())
+        {
             send_flutter_window_event(runtime, event)?;
         } else {
-            events.pending_unpublished_window_events.push(event);
+            events.window_events.unpublished.push(event);
         }
     }
-    events.pending_window_events.recycle_drained(pending);
+    events.window_events.pending.recycle_drained(pending);
     Ok(())
 }
 
@@ -736,7 +738,7 @@ fn synchronize_control_settings(
     runtime: &mut flutter_runtime::FlutterRuntime,
     events: &mut RuntimeState,
 ) -> Result<(), Box<dyn Error>> {
-    while let Some(request) = events.pending_settings_controls.pop_front() {
+    while let Some(request) = events.control.settings.pop_front() {
         let (command, reply) = request.into_parts();
         let result = match command {
             SettingsControlCommand::ReadDocument => {
@@ -880,8 +882,8 @@ fn control_input_snapshot(
     Ok(json!({
         "revision": frontend.settings.revision(),
         "input_deck": wayland_frontend::input_deck_snapshot(events),
-        "has_touchpad": !events.touchpad_devices.is_empty(),
-        "has_mouse": !events.mouse_devices.is_empty(),
+        "has_touchpad": !events.input_devices.touchpads.is_empty(),
+        "has_mouse": !events.input_devices.mice.is_empty(),
         "mouse_speed": mouse.speed,
         "tap_to_click_enabled": touchpad.tap_to_click_enabled,
         "natural_scroll_enabled": touchpad.natural_scroll_enabled,
@@ -1135,9 +1137,9 @@ pub(super) fn send_input_device_settings(
         request_id,
         frontend.settings.revision(),
         wire::InputDeviceSettings {
-            has_touchpad: !events.touchpad_devices.is_empty(),
+            has_touchpad: !events.input_devices.touchpads.is_empty(),
             touchpad: frontend.settings.touchpad(),
-            has_mouse: !events.mouse_devices.is_empty(),
+            has_mouse: !events.input_devices.mice.is_empty(),
             mouse: frontend.settings.mouse(),
         },
         error,

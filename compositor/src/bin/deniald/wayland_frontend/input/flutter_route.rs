@@ -960,7 +960,8 @@ pub(super) fn activate_client_route(
     if keyboard.current_focus().as_ref() != Some(&keyboard_focus) {
         request_keyboard_focus(state, &keyboard, Some(keyboard_focus), serial);
         state
-            .pending_window_events
+            .window_events
+            .pending
             .push(PendingWindowEvent::Activated(route.region.window_id));
     }
     scene_changed
