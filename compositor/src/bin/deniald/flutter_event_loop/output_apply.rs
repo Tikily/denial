@@ -532,9 +532,9 @@ impl Session<'_, '_> {
             return Ok(());
         }
 
-        if let Some(frontend) = self.events.wayland.as_mut() {
-            frontend.set_scrolling_layout_axes(&configuration.scrolling_layout_axes);
-        }
+        self.events
+            .frontend_mut()
+            .set_scrolling_layout_axes(&configuration.scrolling_layout_axes);
         self.output_configuration = configuration;
         self.events.output_control_dirty = true;
         self.replace_frame_schedulers("output scheduler has no physical output pools")?;
@@ -560,9 +560,9 @@ impl Session<'_, '_> {
             desired_power,
             ..
         } = staged;
-        if let Some(frontend) = self.events.wayland.as_mut() {
-            frontend.set_scrolling_layout_axes(&configuration.scrolling_layout_axes);
-        }
+        self.events
+            .frontend_mut()
+            .set_scrolling_layout_axes(&configuration.scrolling_layout_axes);
         self.output_configuration = configuration;
         self.events.output_control_dirty = true;
         self.apply_requested_output_power(desired_power)?;
@@ -624,10 +624,7 @@ impl Session<'_, '_> {
         let pending_sensor_rotation = *pending_sensor_rotation;
         let requested_rotation = orientation_sensor::select_rotation(
             pending_sensor_rotation,
-            events
-                .wayland
-                .as_ref()
-                .and_then(|frontend| frontend.settings.locked_sensor_rotation()),
+            events.frontend().settings.locked_sensor_rotation(),
         );
         if requested_rotation == output_configuration.sensor_rotation
             || scheduler.has_pending_scanout_work()
@@ -651,9 +648,8 @@ impl Session<'_, '_> {
         if let Some(pending) = active_output_confirmation.as_mut() {
             pending.rollback_configuration.sensor_rotation = requested_rotation;
         }
-        if let Some(frontend) = events.wayland.as_mut() {
-            frontend.settings.current_sensor_rotation = output_configuration.sensor_rotation;
-        }
+        events.frontend_mut().settings.current_sensor_rotation =
+            output_configuration.sensor_rotation;
         frame_scheduler.reconfigure(scanouts, now);
         Ok(())
     }

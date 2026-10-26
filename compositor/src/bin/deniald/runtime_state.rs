@@ -339,7 +339,6 @@ impl RuntimeState {
 #[cfg(all(test, feature = "flutter"))]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
     fn replacement_rehydration_waits_for_the_first_input_layout() {

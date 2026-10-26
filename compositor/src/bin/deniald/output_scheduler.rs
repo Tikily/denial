@@ -1773,9 +1773,9 @@ impl OutputScheduler {
                     completion.presented_at.is_some(),
                 );
             }
-            if let Some(frontend) = events.wayland.as_mut() {
-                frontend.sampled_frame_presented(presentation, &presented.feedback)?;
-            }
+            events
+                .frontend_mut()
+                .sampled_frame_presented(presentation, &presented.feedback)?;
             if let Some(trace) = self.delivery_trace.as_mut() {
                 trace.finish(
                     presented.delivery,
@@ -1788,9 +1788,9 @@ impl OutputScheduler {
             self.presented_outputs.push(presentation);
             self.presented_frames = self.presented_frames.saturating_add(1);
         }
-        if let Some(frontend) = events.wayland.as_mut() {
-            frontend.outputs_presented(&self.presented_outputs)?;
-        }
+        events
+            .frontend_mut()
+            .outputs_presented(&self.presented_outputs)?;
         if let Some(error) = processing_error {
             return Err(error);
         }

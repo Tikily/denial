@@ -224,10 +224,7 @@ pub(super) fn synchronize_idle_dpms(scanouts: &[Scanout], events: &mut RuntimeSt
     if events.fingerprint.active() {
         return;
     }
-    let inhibited = events
-        .wayland
-        .as_mut()
-        .is_some_and(wayland_frontend::WaylandFrontend::idle_inhibited);
+    let inhibited = events.frontend_mut().idle_inhibited();
     let idle_policy::IdlePolicyActions {
         power_requests,
         lock,
@@ -343,9 +340,7 @@ pub(super) fn apply_output_power_requests(
             events
                 .idle_policy
                 .note_power_failure(output, Instant::now());
-            if let Some(frontend) = events.wayland.as_mut() {
-                frontend.fail_output_power(output);
-            }
+            events.frontend_mut().fail_output_power(output);
             continue;
         };
         let current = scanouts[scanout_index].powered;
@@ -354,9 +349,7 @@ pub(super) fn apply_output_power_requests(
                 scheduler.cancel_power_off(output, scanouts);
             }
             if !powered || !scheduler.power_on_pending(output) {
-                if let Some(frontend) = events.wayland.as_mut() {
-                    frontend.output_power_applied(output, powered);
-                }
+                events.frontend_mut().output_power_applied(output, powered);
             }
             continue;
         }
@@ -428,9 +421,7 @@ pub(super) fn apply_output_power_requests(
                 events
                     .idle_policy
                     .note_power_failure(output, Instant::now());
-                if let Some(frontend) = events.wayland.as_mut() {
-                    frontend.fail_output_power(output);
-                }
+                events.frontend_mut().fail_output_power(output);
             }
             warn!(
                 output = scanouts[failed_index].output.name,
@@ -458,9 +449,7 @@ pub(super) fn apply_output_power_requests(
                     output = scanouts[scanout_index].output.name,
                     "powered off KMS output through DRM DPMS"
                 );
-                if let Some(frontend) = events.wayland.as_mut() {
-                    frontend.output_power_applied(output, false);
-                }
+                events.frontend_mut().output_power_applied(output, false);
             }
         }
     }

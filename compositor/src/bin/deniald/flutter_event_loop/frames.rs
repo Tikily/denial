@@ -94,10 +94,7 @@ impl Session<'_, '_> {
                 .iter()
                 .map(|scanout| (scanout.output.id, scanout.output.crtc)),
         );
-        let external_changes_pending = events
-            .wayland
-            .as_ref()
-            .is_some_and(wayland_frontend::WaylandFrontend::has_pending_gamma_changes);
+        let external_changes_pending = events.frontend().has_pending_gamma_changes();
         if !gamma_work_pending(
             topology_changed,
             !requests.is_empty() || !events.pending_software_dimming.is_empty(),
@@ -312,9 +309,7 @@ impl Session<'_, '_> {
             ..
         } = self;
         for tick in frame_scheduler.output_ticks().iter().copied() {
-            if let Some(frontend) = events.wayland.as_mut() {
-                frontend.frame_tick(tick)?;
-            }
+            events.frontend_mut().frame_tick(tick)?;
             scheduler.process_screencopies_at_tick(
                 tick,
                 renderer,

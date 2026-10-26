@@ -951,7 +951,7 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
                         .ok_or("Flutter output control was not initialized")?
                         .publisher(),
                     portal_ipc: portal_ipc_server.as_ref().map(PortalIpcServer::publisher),
-                    wayland,
+                    wayland: wayland.ok_or("--flutter-bundle requires --wayland")?,
                     gamma_control: Arc::clone(&gamma_control),
                     flutter: &mut flutter,
                     flutter_launcher: flutter_launcher

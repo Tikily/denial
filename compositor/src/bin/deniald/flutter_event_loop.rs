@@ -351,14 +351,8 @@ impl Session<'_, '_> {
                     events.idle_policy.idle_for(Instant::now()).as_millis(),
                 )
                 .unwrap_or(u64::MAX),
-                shell_captures_keyboard: events
-                    .wayland
-                    .as_ref()
-                    .is_some_and(|frontend| frontend.shell_captures_keyboard()),
-                idle_inhibited: events
-                    .wayland
-                    .as_mut()
-                    .is_some_and(wayland_frontend::WaylandFrontend::idle_inhibited),
+                shell_captures_keyboard: events.frontend().shell_captures_keyboard(),
+                idle_inhibited: events.frontend_mut().idle_inhibited(),
             });
             let state =
                 state.with_native_client_composition(runtime.native_client_composition_stats());
@@ -395,10 +389,7 @@ impl Session<'_, '_> {
             || screenshot_manager
                 .as_ref()
                 .is_some_and(|manager| manager.request_id().is_some())
-            || events
-                .wayland
-                .as_ref()
-                .is_some_and(wayland_frontend::WaylandFrontend::wants_frame_ticks)
+            || events.frontend().wants_frame_ticks()
     }
 
     fn next_dispatch_timeout(&self, now: Instant) -> Option<Duration> {
@@ -456,9 +447,7 @@ impl Session<'_, '_> {
                 continue;
             }
             self.synchronize_software_dimming()?;
-            if let Some(frontend) = self.events.wayland.as_mut() {
-                frontend.reap_capture_source_reads();
-            }
+            self.events.frontend_mut().reap_capture_source_reads();
             let iteration_now = Instant::now();
             if self.events.dpms_topology.service_deadline(iteration_now) {
                 self.events.topology_dirty = true;
@@ -480,10 +469,8 @@ impl Session<'_, '_> {
                     .next_deadline()
                     .is_some_and(|deadline| iteration_now >= deadline),
             );
-            if let Some(frontend) = self.events.wayland.as_mut() {
-                frontend.settings.current_sensor_rotation =
-                    self.output_configuration.sensor_rotation;
-            }
+            self.events.frontend_mut().settings.current_sensor_rotation =
+                self.output_configuration.sensor_rotation;
             if let Some(orientation) = self.events.pending_orientation.take() {
                 orientation.update_rotation(&mut self.pending_sensor_rotation);
                 debug!(?orientation, rotation = ?self.pending_sensor_rotation, "observed device orientation");
@@ -584,9 +571,8 @@ impl Session<'_, '_> {
                     OutputTopologyObservation::Stable => {
                         // EDID may arrive late or change with no mode/CRTC change.
                         // Publish it without rebuilding KMS/Flutter scanouts.
-                        if let Some(frontend) = self.events.wayland.as_mut()
-                            && frontend.output_metadata_changed()
-                        {
+                        let frontend = self.events.frontend_mut();
+                        if frontend.output_metadata_changed() {
                             frontend.update_topology(&self.topology.snapshot())?;
                         }
                     }
@@ -674,10 +660,9 @@ impl Session<'_, '_> {
             if self.events.flutter_channel_closed {
                 return Err("Flutter callback channel closed while the engine was running".into());
             }
-            if let Some(frontend) = self.events.wayland.as_mut() {
-                frontend.process_pending_dmabufs(self.renderer)?;
-                frontend.process_toplevel_screencopies(self.renderer)?;
-            }
+            let frontend = self.events.frontend_mut();
+            frontend.process_pending_dmabufs(self.renderer)?;
+            frontend.process_toplevel_screencopies(self.renderer)?;
 
             if self.begin_pending_screenshot_selection()?
                 || self.handle_prepared_screenshot(screenshot_prepared)?
@@ -769,7 +754,7 @@ pub(super) struct FlutterEventLoopContext<'a, 'event_loop> {
     pub(super) output_config: Option<PathBuf>,
     pub(super) output_control: output_control::OutputControlPublisher,
     pub(super) portal_ipc: Option<portal_ipc::PortalIpcPublisher>,
-    pub(super) wayland: Option<wayland_frontend::WaylandFrontend>,
+    pub(super) wayland: wayland_frontend::WaylandFrontend,
     pub(super) gamma_control: Arc<Mutex<gamma_control::GammaController>>,
     // The startup boundary retains ownership so an error or unwind cannot
     // destroy the engine before that boundary releases DRM master.
@@ -815,10 +800,7 @@ pub(super) fn run_flutter_event_loop(
                 .ok_or("Flutter session duration exceeds the monotonic clock range")
         })
         .transpose()?;
-    let system_controls = wayland
-        .as_ref()
-        .map(|_| SystemControls::new())
-        .transpose()?;
+    let system_controls = Some(SystemControls::new()?);
     let notification_server = services::start_notification_server(event_loop)?;
     // The startup boundary owns the runtime; it stays alive for the whole
     // loop. A replacement that cannot start, nor restart the old shell,
@@ -829,14 +811,12 @@ pub(super) fn run_flutter_event_loop(
     let initial_runtime = &*flutter;
     let authentication = Some(initial_runtime.authentication());
     let clipboard = initial_runtime.clipboard();
-    let native_escape_shortcut = wayland
-        .as_ref()
-        .map(|frontend| frontend.shortcuts.engine())
-        .unwrap_or_default();
+    let native_escape_shortcut = wayland.shortcuts.engine();
+    let settings_path = wayland.settings.path().to_path_buf();
     let initial_theme_snapshot = portal_ipc.as_ref().map(|publisher| publisher.snapshot());
     let initial_settings_document_revision = output_control.settings_document_revision();
     let mut events = RuntimeState {
-        wayland,
+        wayland: Some(wayland),
         gamma_control,
         native_escape_shortcut,
         clipboard,
@@ -856,12 +836,7 @@ pub(super) fn run_flutter_event_loop(
         ..RuntimeState::default()
     };
     synchronize_fingerprint_unlock(&events);
-    if let Some(settings_path) = events
-        .wayland
-        .as_ref()
-        .map(|frontend| frontend.settings.path().to_path_buf())
-        && let Err(error) = settings_watch::install(&event_loop.handle(), &settings_path)
-    {
+    if let Err(error) = settings_watch::install(&event_loop.handle(), &settings_path) {
         warn!(%error, path = %settings_path.display(), "could not watch Denial settings for external edits");
     }
     let _orientation_sensor = services::start_orientation_sensor(event_loop)?;

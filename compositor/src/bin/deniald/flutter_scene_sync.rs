@@ -39,9 +39,9 @@ pub(super) fn try_synchronize_flutter_buffers(
     };
 
     let textures = runtime.sync_wayland_buffers(textures)?;
-    if let Some(frontend) = events.wayland.as_mut() {
-        frontend.recycle_flutter_dirty_textures(textures);
-    }
+    events
+        .frontend_mut()
+        .recycle_flutter_dirty_textures(textures);
     events.scene_sync.mark_buffers_synchronized(buffer_revision);
     Ok(true)
 }
@@ -120,9 +120,9 @@ pub(super) fn synchronize_flutter_scene(
             .restored_window_ids
             .retain(|window_id| published_window_ids.contains(window_id));
     }
-    if let Some(frontend) = events.wayland.as_mut() {
-        frontend.recycle_flutter_scene(windows, textures);
-    }
+    events
+        .frontend_mut()
+        .recycle_flutter_scene(windows, textures);
     // A later Wayland commit has a newer revision, so acknowledging this
     // captured revision cannot erase work that arrived while Flutter/KMS was
     // processing the previous frame.
@@ -172,10 +172,7 @@ pub(super) fn synchronize_flutter_input_layout(
         return Ok(());
     }
     let next_shell_capture = layout.keyboard_capture() || layout.exclusive_shell();
-    let previous_shell_capture = events
-        .wayland
-        .as_ref()
-        .is_some_and(wayland_frontend::WaylandFrontend::shell_captures_keyboard);
+    let previous_shell_capture = events.frontend().shell_captures_keyboard();
     if next_shell_capture && !previous_shell_capture {
         wayland_frontend::suspend_keyboard_focus_for_shell(events);
     }

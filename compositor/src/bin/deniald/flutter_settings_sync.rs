@@ -37,10 +37,7 @@ pub(super) fn synchronize_flutter_window_management(
             }
         }
         while let Some(target) = events.pending_shortcut_launches.pop_front() {
-            let activation_token = events
-                .wayland
-                .as_mut()
-                .map(wayland_frontend::WaylandFrontend::create_launch_activation_token);
+            let activation_token = Some(events.frontend_mut().create_launch_activation_token());
             let result = match target {
                 native_shortcut::ShortcutTarget::Spawn {
                     command,
@@ -66,10 +63,7 @@ pub(super) fn synchronize_flutter_window_management(
             }
         }
         while let Some(launch) = runtime.take_application_launch() {
-            let activation_token = events
-                .wayland
-                .as_mut()
-                .map(wayland_frontend::WaylandFrontend::create_launch_activation_token);
+            let activation_token = Some(events.frontend_mut().create_launch_activation_token());
             if let Err(error) = runtime.start_application(launch, activation_token.as_deref()) {
                 warn!(%error, "could not launch application requested by Flutter shell");
             }
@@ -117,11 +111,7 @@ pub(super) fn synchronize_settings(
         match command {
             wire::SettingsCommand::ReadDocument { request_id } => {
                 let (revision, document) = {
-                    let settings = &events
-                        .wayland
-                        .as_ref()
-                        .ok_or("settings request has no Wayland frontend")?
-                        .settings;
+                    let settings = &events.frontend().settings;
                     (settings.revision(), settings.document_json())
                 };
                 match document {
@@ -145,10 +135,7 @@ pub(super) fn synchronize_settings(
                 document,
             } => {
                 let result = {
-                    let frontend = events
-                        .wayland
-                        .as_mut()
-                        .ok_or("settings request has no Wayland frontend")?;
+                    let frontend = events.frontend_mut();
                     let previous_cursor_policy = frontend.settings.allow_client_cursor_surfaces();
                     let previous_cursor_size = frontend.settings.cursor_size();
                     let result = frontend
@@ -199,9 +186,7 @@ pub(super) fn synchronize_settings(
             }
             wire::SettingsCommand::ReadKeyboard { request_id } => {
                 send_keyboard_settings(runtime, events, request_id, None)?;
-                if let Some(frontend) = events.wayland.as_mut() {
-                    frontend.keyboard_configuration_changed = false;
-                }
+                events.frontend_mut().keyboard_configuration_changed = false;
             }
             wire::SettingsCommand::ReadInputDevices { request_id } => {
                 send_input_device_settings(runtime, events, request_id, None)?;
@@ -213,9 +198,7 @@ pub(super) fn synchronize_settings(
                 keyboard,
             } => {
                 let prepared = events
-                    .wayland
-                    .as_ref()
-                    .ok_or("settings request has no Wayland frontend")?
+                    .frontend()
                     .settings
                     .prepare_keyboard_update(expected_revision, keyboard);
                 let result = match prepared {
@@ -285,9 +268,7 @@ pub(super) fn synchronize_settings(
                 touchpad,
             } => {
                 let prepared = events
-                    .wayland
-                    .as_ref()
-                    .ok_or("touchpad update has no Wayland frontend")?
+                    .frontend()
                     .settings
                     .prepare_touchpad_update(expected_revision, touchpad);
                 let result = match prepared {
@@ -353,10 +334,8 @@ pub(super) fn synchronize_settings(
                         .map(|error| error.to_string())
                         .as_deref(),
                 )?;
-                if result.is_ok()
-                    && let Some(frontend) = events.wayland.as_mut()
-                {
-                    frontend.keyboard_configuration_changed = true;
+                if result.is_ok() {
+                    events.frontend_mut().keyboard_configuration_changed = true;
                 }
             }
             wire::SettingsCommand::ConfigureMouse {
@@ -365,9 +344,7 @@ pub(super) fn synchronize_settings(
                 mouse,
             } => {
                 let prepared = events
-                    .wayland
-                    .as_ref()
-                    .ok_or("mouse update has no Wayland frontend")?
+                    .frontend()
                     .settings
                     .prepare_mouse_update(expected_revision, mouse);
                 let result = match prepared {
@@ -427,10 +404,8 @@ pub(super) fn synchronize_settings(
                         .map(|error| error.to_string())
                         .as_deref(),
                 )?;
-                if result.is_ok()
-                    && let Some(frontend) = events.wayland.as_mut()
-                {
-                    frontend.keyboard_configuration_changed = true;
+                if result.is_ok() {
+                    events.frontend_mut().keyboard_configuration_changed = true;
                 }
             }
             wire::SettingsCommand::ReadShortcuts { request_id } => {
@@ -442,11 +417,7 @@ pub(super) fn synchronize_settings(
                 existing_shortcut,
             } => {
                 let (revision, validation) = {
-                    let manager = &events
-                        .wayland
-                        .as_ref()
-                        .ok_or("shortcut validation has no Wayland frontend")?
-                        .shortcuts;
+                    let manager = &events.frontend().shortcuts;
                     (
                         manager.revision(),
                         manager.validate_shortcut(&shortcut, existing_shortcut.as_deref()),
@@ -460,9 +431,7 @@ pub(super) fn synchronize_settings(
                 shortcut,
             } => {
                 let prepared = events
-                    .wayland
-                    .as_ref()
-                    .ok_or("shortcut update has no Wayland frontend")?
+                    .frontend()
                     .shortcuts
                     .prepare_add(expected_revision, shortcut);
                 apply_shortcut_update(runtime, events, request_id, prepared)?;
@@ -473,12 +442,11 @@ pub(super) fn synchronize_settings(
                 existing_shortcut,
                 shortcut,
             } => {
-                let prepared = events
-                    .wayland
-                    .as_ref()
-                    .ok_or("shortcut update has no Wayland frontend")?
-                    .shortcuts
-                    .prepare_update(expected_revision, &existing_shortcut, shortcut);
+                let prepared = events.frontend().shortcuts.prepare_update(
+                    expected_revision,
+                    &existing_shortcut,
+                    shortcut,
+                );
                 apply_shortcut_update(runtime, events, request_id, prepared)?;
             }
             wire::SettingsCommand::RemoveShortcut {
@@ -487,9 +455,7 @@ pub(super) fn synchronize_settings(
                 shortcut,
             } => {
                 let prepared = events
-                    .wayland
-                    .as_ref()
-                    .ok_or("shortcut removal has no Wayland frontend")?
+                    .frontend()
                     .shortcuts
                     .prepare_remove(expected_revision, &shortcut);
                 apply_shortcut_update(runtime, events, request_id, prepared)?;
@@ -499,9 +465,7 @@ pub(super) fn synchronize_settings(
                 expected_revision,
             } => {
                 let prepared = events
-                    .wayland
-                    .as_ref()
-                    .ok_or("shortcut restore has no Wayland frontend")?
+                    .frontend()
                     .shortcuts
                     .prepare_restore(expected_revision);
                 apply_shortcut_update(runtime, events, request_id, prepared)?;
@@ -509,32 +473,22 @@ pub(super) fn synchronize_settings(
         }
     }
 
-    let changed = events
-        .wayland
-        .as_mut()
-        .is_some_and(|frontend| std::mem::take(&mut frontend.keyboard_configuration_changed));
-    if changed {
+    if std::mem::take(&mut events.frontend_mut().keyboard_configuration_changed) {
         send_keyboard_settings(runtime, events, 0, None)?;
     }
     if std::mem::take(&mut events.input_device_capabilities_changed) {
         send_input_device_settings(runtime, events, 0, None)?;
     }
-    let layout_changed = events.wayland.as_mut().is_some_and(|frontend| {
-        let kind = frontend.settings.window_layout_kind();
-        frontend.set_window_layout_kind(kind)
-    });
-    if layout_changed {
+    let frontend = events.frontend_mut();
+    let kind = frontend.settings.window_layout_kind();
+    if frontend.set_window_layout_kind(kind) {
         events.scene_sync.mark_dirty();
     }
-    let workspace_states = events.wayland.as_mut().and_then(|frontend| {
-        let settings = frontend.settings.workspace_settings();
-        if !frontend.set_workspace_settings(settings) {
-            return None;
-        }
+    let frontend = events.frontend_mut();
+    let settings = frontend.settings.workspace_settings();
+    if frontend.set_workspace_settings(settings) {
         frontend.rebuild_window_layout();
-        Some(frontend.workspace_state_snapshot())
-    });
-    if let Some(workspace_states) = workspace_states {
+        let workspace_states = frontend.workspace_state_snapshot();
         for (monitor_id, workspace_id) in workspace_states {
             events.queue_workspace_action(monitor_id, workspace_id);
         }
@@ -553,17 +507,13 @@ fn synchronize_external_settings(
     if !std::mem::take(&mut events.settings_external_change_pending) {
         return;
     }
-    let prepared = match events
-        .wayland
-        .as_ref()
-        .map(|frontend| frontend.settings.prepare_external_reload())
-    {
-        None | Some(Ok(None)) => return,
-        Some(Err(error)) => {
+    let prepared = match events.frontend().settings.prepare_external_reload() {
+        Ok(None) => return,
+        Err(error) => {
             warn!(%error, "rejected externally edited Denial settings");
             return;
         }
-        Some(Ok(Some(prepared))) => prepared,
+        Ok(Some(prepared)) => prepared,
     };
 
     let (
@@ -702,11 +652,10 @@ fn rollback_external_native_settings(
 
 #[cfg(feature = "flutter")]
 fn publish_settings_document(events: &mut RuntimeState) -> Result<(), Box<dyn Error>> {
-    let (Some(publisher), Some(frontend)) =
-        (events.output_control.as_ref(), events.wayland.as_ref())
-    else {
+    let Some(publisher) = events.output_control.as_ref() else {
         return Ok(());
     };
+    let frontend = events.frontend();
     let revision = frontend.settings.revision();
     if events.published_settings_document_revision == Some(revision) {
         return Ok(());
@@ -722,10 +671,8 @@ fn publish_settings_document(events: &mut RuntimeState) -> Result<(), Box<dyn Er
 /// and after every settings revision.
 #[cfg(feature = "flutter")]
 pub(super) fn synchronize_fingerprint_unlock(events: &RuntimeState) {
-    if let (Some(authentication), Some(frontend)) =
-        (events.authentication.as_ref(), events.wayland.as_ref())
-    {
-        authentication.enable_fingerprint(frontend.settings.fingerprint_unlock());
+    if let Some(authentication) = events.authentication.as_ref() {
+        authentication.enable_fingerprint(events.frontend().settings.fingerprint_unlock());
     }
 }
 
@@ -734,14 +681,11 @@ fn synchronize_committed_theme(
     runtime: &mut flutter_runtime::FlutterRuntime,
     events: &mut RuntimeState,
 ) -> Result<(), Box<dyn Error>> {
-    let Some(snapshot) = events.wayland.as_ref().map(|frontend| {
-        frontend
-            .settings
-            .theme_snapshot()
-            .with_accent(events.resolved_theme_accent)
-    }) else {
-        return Ok(());
-    };
+    let snapshot = events
+        .frontend()
+        .settings
+        .theme_snapshot()
+        .with_accent(events.resolved_theme_accent);
     if events.published_theme_snapshot == Some(snapshot) {
         return Ok(());
     }
@@ -759,6 +703,35 @@ fn synchronize_committed_theme(
 }
 
 #[cfg(feature = "flutter")]
+fn write_settings_document(
+    frontend: &mut wayland_frontend::WaylandFrontend,
+    expected_revision: u64,
+    document: &str,
+) -> Result<(u64, String), OutputControlFailure> {
+    let previous_cursor_policy = frontend.settings.allow_client_cursor_surfaces();
+    let previous_cursor_size = frontend.settings.cursor_size();
+    frontend
+        .settings
+        .prepare_shell_update(expected_revision, document)
+        .and_then(|prepared| frontend.settings.commit(prepared))
+        .map_err(|error| OutputControlFailure::new("conflict", error.to_string()))?;
+    if previous_cursor_policy != frontend.settings.allow_client_cursor_surfaces() {
+        frontend.queue_cursor_policy_update();
+    }
+    if previous_cursor_size != frontend.settings.cursor_size() {
+        if let Err(error) = frontend.publish_xwayland_settings() {
+            warn!(%error, "could not update Xwayland cursor settings");
+        }
+    }
+    frontend.keyboard_configuration_changed = true;
+    frontend
+        .settings
+        .document_json()
+        .map(|document| (frontend.settings.revision(), document))
+        .map_err(|error| OutputControlFailure::new("failed", error.to_string()))
+}
+
+#[cfg(feature = "flutter")]
 fn synchronize_control_settings(
     runtime: &mut flutter_runtime::FlutterRuntime,
     events: &mut RuntimeState,
@@ -767,70 +740,23 @@ fn synchronize_control_settings(
         let (command, reply) = request.into_parts();
         let result = match command {
             SettingsControlCommand::ReadDocument => {
-                let result = events
-                    .wayland
-                    .as_ref()
-                    .ok_or_else(|| {
-                        OutputControlFailure::new(
-                            "unavailable",
-                            "settings request has no Wayland frontend",
-                        )
+                let settings = &events.frontend().settings;
+                settings
+                    .document_json()
+                    .map(|document| {
+                        json!({
+                            "revision": settings.revision(),
+                            "document": document,
+                        })
                     })
-                    .and_then(|frontend| {
-                        frontend
-                            .settings
-                            .document_json()
-                            .map(|document| {
-                                json!({
-                                    "revision": frontend.settings.revision(),
-                                    "document": document,
-                                })
-                            })
-                            .map_err(|error| OutputControlFailure::new("failed", error.to_string()))
-                    });
-                result
+                    .map_err(|error| OutputControlFailure::new("failed", error.to_string()))
             }
             SettingsControlCommand::WriteDocument {
                 expected_revision,
                 document,
             } => {
-                let result = events
-                    .wayland
-                    .as_mut()
-                    .ok_or_else(|| {
-                        OutputControlFailure::new(
-                            "unavailable",
-                            "settings request has no Wayland frontend",
-                        )
-                    })
-                    .and_then(|frontend| {
-                        let previous_cursor_policy =
-                            frontend.settings.allow_client_cursor_surfaces();
-                        let previous_cursor_size = frontend.settings.cursor_size();
-                        frontend
-                            .settings
-                            .prepare_shell_update(expected_revision, &document)
-                            .and_then(|prepared| frontend.settings.commit(prepared))
-                            .map_err(|error| {
-                                OutputControlFailure::new("conflict", error.to_string())
-                            })?;
-                        if previous_cursor_policy
-                            != frontend.settings.allow_client_cursor_surfaces()
-                        {
-                            frontend.queue_cursor_policy_update();
-                        }
-                        if previous_cursor_size != frontend.settings.cursor_size() {
-                            if let Err(error) = frontend.publish_xwayland_settings() {
-                                warn!(%error, "could not update Xwayland cursor settings");
-                            }
-                        }
-                        frontend.keyboard_configuration_changed = true;
-                        frontend
-                            .settings
-                            .document_json()
-                            .map(|document| (frontend.settings.revision(), document))
-                            .map_err(|error| OutputControlFailure::new("failed", error.to_string()))
-                    });
+                let result =
+                    write_settings_document(events.frontend_mut(), expected_revision, &document);
                 match result {
                     Ok((revision, document)) => {
                         events.input_device_capabilities_changed = true;
@@ -872,61 +798,46 @@ fn synchronize_control_settings(
             SettingsControlCommand::AddShortcut {
                 expected_revision,
                 shortcut,
-            } => match events.wayland.as_ref() {
-                Some(frontend) => {
-                    let prepared = frontend.shortcuts.prepare_add(expected_revision, shortcut);
-                    apply_control_shortcut_update(events, prepared)
-                }
-                None => Err(control_unavailable("shortcut update")),
-            },
+            } => {
+                let prepared = events
+                    .frontend()
+                    .shortcuts
+                    .prepare_add(expected_revision, shortcut);
+                apply_control_shortcut_update(events, prepared)
+            }
             SettingsControlCommand::UpdateShortcut {
                 expected_revision,
                 existing_shortcut,
                 shortcut,
-            } => match events.wayland.as_ref() {
-                Some(frontend) => {
-                    let prepared = frontend.shortcuts.prepare_update(
-                        expected_revision,
-                        &existing_shortcut,
-                        shortcut,
-                    );
-                    apply_control_shortcut_update(events, prepared)
-                }
-                None => Err(control_unavailable("shortcut update")),
-            },
+            } => {
+                let prepared = events.frontend().shortcuts.prepare_update(
+                    expected_revision,
+                    &existing_shortcut,
+                    shortcut,
+                );
+                apply_control_shortcut_update(events, prepared)
+            }
             SettingsControlCommand::RemoveShortcut {
                 expected_revision,
                 shortcut,
-            } => match events.wayland.as_ref() {
-                Some(frontend) => {
-                    let prepared = frontend
-                        .shortcuts
-                        .prepare_remove(expected_revision, &shortcut);
-                    apply_control_shortcut_update(events, prepared)
-                }
-                None => Err(control_unavailable("shortcut removal")),
-            },
+            } => {
+                let prepared = events
+                    .frontend()
+                    .shortcuts
+                    .prepare_remove(expected_revision, &shortcut);
+                apply_control_shortcut_update(events, prepared)
+            }
             SettingsControlCommand::RestoreShortcuts { expected_revision } => {
-                match events.wayland.as_ref() {
-                    Some(frontend) => {
-                        let prepared = frontend.shortcuts.prepare_restore(expected_revision);
-                        apply_control_shortcut_update(events, prepared)
-                    }
-                    None => Err(control_unavailable("shortcut restore")),
-                }
+                let prepared = events
+                    .frontend()
+                    .shortcuts
+                    .prepare_restore(expected_revision);
+                apply_control_shortcut_update(events, prepared)
             }
         };
         let _ = reply.send(result);
     }
     Ok(())
-}
-
-#[cfg(feature = "flutter")]
-fn control_unavailable(operation: &str) -> OutputControlFailure {
-    OutputControlFailure::new(
-        "unavailable",
-        format!("{operation} has no Wayland frontend"),
-    )
 }
 
 #[cfg(feature = "flutter")]
@@ -943,10 +854,7 @@ fn control_conflict(error: impl std::fmt::Display) -> OutputControlFailure {
 fn control_keyboard_snapshot(
     events: &RuntimeState,
 ) -> Result<serde_json::Value, OutputControlFailure> {
-    let frontend = events
-        .wayland
-        .as_ref()
-        .ok_or_else(|| control_unavailable("keyboard settings"))?;
+    let frontend = events.frontend();
     let keyboard = frontend.settings.keyboard();
     Ok(json!({
         "revision": frontend.settings.revision(),
@@ -966,10 +874,7 @@ fn control_keyboard_snapshot(
 fn control_input_snapshot(
     events: &RuntimeState,
 ) -> Result<serde_json::Value, OutputControlFailure> {
-    let frontend = events
-        .wayland
-        .as_ref()
-        .ok_or_else(|| control_unavailable("input settings"))?;
+    let frontend = events.frontend();
     let touchpad = frontend.settings.touchpad();
     let mouse = frontend.settings.mouse();
     Ok(json!({
@@ -992,9 +897,7 @@ fn apply_control_keyboard(
     keyboard: settings::KeyboardSettings,
 ) -> Result<serde_json::Value, OutputControlFailure> {
     let prepared = events
-        .wayland
-        .as_ref()
-        .ok_or_else(|| control_unavailable("keyboard update"))?
+        .frontend()
         .settings
         .prepare_keyboard_update(expected_revision, keyboard)
         .map_err(control_conflict)?;
@@ -1016,9 +919,7 @@ fn apply_control_touchpad(
     touchpad: settings::TouchpadSettings,
 ) -> Result<serde_json::Value, OutputControlFailure> {
     let prepared = events
-        .wayland
-        .as_ref()
-        .ok_or_else(|| control_unavailable("touchpad update"))?
+        .frontend()
         .settings
         .prepare_touchpad_update(expected_revision, touchpad)
         .map_err(control_conflict)?;
@@ -1029,9 +930,7 @@ fn apply_control_touchpad(
         wayland_frontend::install_touchpad_settings(events, &previous).map_err(control_failed)?;
         return Err(control_failed(error));
     }
-    if let Some(frontend) = events.wayland.as_mut() {
-        frontend.keyboard_configuration_changed = true;
-    }
+    events.frontend_mut().keyboard_configuration_changed = true;
     control_input_snapshot(events)
 }
 
@@ -1042,9 +941,7 @@ fn apply_control_mouse(
     mouse: settings::MouseSettings,
 ) -> Result<serde_json::Value, OutputControlFailure> {
     let prepared = events
-        .wayland
-        .as_ref()
-        .ok_or_else(|| control_unavailable("mouse update"))?
+        .frontend()
         .settings
         .prepare_mouse_update(expected_revision, mouse)
         .map_err(control_conflict)?;
@@ -1055,9 +952,7 @@ fn apply_control_mouse(
         wayland_frontend::install_mouse_settings(events, &previous).map_err(control_failed)?;
         return Err(control_failed(error));
     }
-    if let Some(frontend) = events.wayland.as_mut() {
-        frontend.keyboard_configuration_changed = true;
-    }
+    events.frontend_mut().keyboard_configuration_changed = true;
     control_input_snapshot(events)
 }
 
@@ -1065,11 +960,7 @@ fn apply_control_mouse(
 fn control_shortcut_snapshot(
     events: &RuntimeState,
 ) -> Result<serde_json::Value, OutputControlFailure> {
-    let manager = &events
-        .wayland
-        .as_ref()
-        .ok_or_else(|| control_unavailable("shortcut settings"))?
-        .shortcuts;
+    let manager = &events.frontend().shortcuts;
     let inputs = native_shortcut::supported_inputs();
     Ok(json!({
         "revision": manager.revision(),
@@ -1092,11 +983,7 @@ fn control_shortcut_validation(
     shortcut: &native_shortcut::ShortcutBinding,
     existing_shortcut: Option<&str>,
 ) -> Result<serde_json::Value, OutputControlFailure> {
-    let manager = &events
-        .wayland
-        .as_ref()
-        .ok_or_else(|| control_unavailable("shortcut validation"))?
-        .shortcuts;
+    let manager = &events.frontend().shortcuts;
     let revision = manager.revision();
     Ok(
         match manager.validate_shortcut(shortcut, existing_shortcut) {
@@ -1129,13 +1016,7 @@ fn apply_control_shortcut_update(
     let mut candidate_engine = prepared.take_engine();
     candidate_engine.set_plugin_actions(&events.plugin_actions);
     let previous_engine = std::mem::replace(&mut events.native_escape_shortcut, candidate_engine);
-    if let Err(error) = events
-        .wayland
-        .as_mut()
-        .ok_or_else(|| control_unavailable("shortcut update"))?
-        .shortcuts
-        .commit(prepared)
-    {
+    if let Err(error) = events.frontend_mut().shortcuts.commit(prepared) {
         events.native_escape_shortcut = previous_engine;
         return Err(control_failed(error));
     }
@@ -1180,12 +1061,7 @@ pub(super) fn apply_shortcut_update(
             candidate_engine.set_plugin_actions(&events.plugin_actions);
             let previous_engine =
                 std::mem::replace(&mut events.native_escape_shortcut, candidate_engine);
-            let result = events
-                .wayland
-                .as_mut()
-                .ok_or("shortcut commit has no Wayland frontend")?
-                .shortcuts
-                .commit(prepared);
+            let result = events.frontend_mut().shortcuts.commit(prepared);
             if result.is_err() {
                 events.native_escape_shortcut = previous_engine;
             } else {
@@ -1217,11 +1093,7 @@ pub(super) fn send_shortcut_settings(
     request_id: u64,
     error: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
-    let manager = &events
-        .wayland
-        .as_ref()
-        .ok_or("shortcut response has no Wayland frontend")?
-        .shortcuts;
+    let manager = &events.frontend().shortcuts;
     let supported_inputs = native_shortcut::supported_inputs();
     runtime.send_shortcut_configuration_response(
         request_id,
@@ -1240,10 +1112,7 @@ pub(super) fn send_keyboard_settings(
     request_id: u64,
     error: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
-    let frontend = events
-        .wayland
-        .as_ref()
-        .ok_or("keyboard settings response has no Wayland frontend")?;
+    let frontend = events.frontend();
     runtime.send_keyboard_settings_response(
         request_id,
         frontend.settings.revision(),
@@ -1261,10 +1130,7 @@ pub(super) fn send_input_device_settings(
     request_id: u64,
     error: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
-    let frontend = events
-        .wayland
-        .as_ref()
-        .ok_or("input device settings response has no Wayland frontend")?;
+    let frontend = events.frontend();
     runtime.send_input_device_capabilities_response(
         request_id,
         frontend.settings.revision(),
@@ -1285,9 +1151,7 @@ pub(super) fn synchronize_system_bar_configuration(
     let Some(work_area) = runtime.take_work_area_update() else {
         return;
     };
-    if let Some(frontend) = events.wayland.as_mut() {
-        frontend.set_work_area(work_area.clone());
-    }
+    events.frontend_mut().set_work_area(work_area.clone());
     if let Some(launcher) = flutter_launcher {
         launcher.set_work_area(work_area);
     }
@@ -1409,9 +1273,8 @@ pub(super) fn apply_resident_output_geometry(
         })
         .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
 
-    if let Some(frontend) = events.wayland.as_mut()
-        && let Err(error) = frontend.update_topology(&snapshot)
-    {
+    let frontend = events.frontend_mut();
+    if let Err(error) = frontend.update_topology(&snapshot) {
         if let Err(rollback_error) = frontend.update_topology(&previous_snapshot) {
             return Err(format!(
                 "resident Wayland geometry update failed ({error}); rollback failed: {rollback_error}"
@@ -1426,11 +1289,7 @@ pub(super) fn apply_resident_output_geometry(
             &previous_atlas,
             flutter_runtime::OutputGeometryTransition::Immediate,
         );
-        let wayland_rollback = events
-            .wayland
-            .as_mut()
-            .map(|frontend| frontend.update_topology(&previous_snapshot))
-            .transpose();
+        let wayland_rollback = events.frontend_mut().update_topology(&previous_snapshot);
         if let Err(rollback_error) = flutter_rollback {
             return Err(format!(
                 "resident Flutter geometry update failed ({error}); Flutter rollback failed: {rollback_error}"
@@ -1457,9 +1316,9 @@ pub(super) fn apply_resident_output_geometry(
     }
     events.output_control_dirty = true;
     *topology = staged_topology;
-    if let Some(frontend) = events.wayland.as_mut() {
-        frontend.set_scrolling_layout_axes(&staged_configuration.scrolling_layout_axes);
-    }
+    events
+        .frontend_mut()
+        .set_scrolling_layout_axes(&staged_configuration.scrolling_layout_axes);
     *configuration = staged_configuration;
     info!(
         outputs = scanouts.len(),
