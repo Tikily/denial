@@ -1064,9 +1064,7 @@ fn apply_placement(
         }
         let geometry = constrain_local_geometry(geometry, change);
         state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
+            .frontend_mut()
             .set_local_flutter_window_global_geometry(window_id, geometry);
         window_management::queue_local_flutter_window_placement(state, window_id, phase, change);
         if phase == WindowPlacementPhase::End {
@@ -1103,7 +1101,7 @@ fn apply_placement(
         // maximized or mobile target can survive until the next client commit.
         super::input::release_client_geometry_for_shell_grab(state, &window);
         window_management::activate_window(state, &window, SERIAL_COUNTER.next_serial());
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         let restored = frontend.window_geometry_target(&window);
         frontend.touch_gestures.placement_transform = Some((
             window_id,
@@ -1118,7 +1116,7 @@ fn apply_placement(
             },
         ));
     }
-    let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+    let frontend = state.frontend_mut();
     let geometry = frontend
         .touch_gestures
         .placement_transform
@@ -1129,20 +1127,14 @@ fn apply_placement(
     }
     let geometry = constrain_client_geometry(&window, geometry, change);
     if change == WindowPlacementChange::Resize {
-        state
-            .wayland
-            .as_ref()
-            .expect("missing Wayland frontend")
-            .prepare_window_interactive_resize(
-                &window,
-                geometry.size,
-                phase == WindowPlacementPhase::End,
-            );
+        state.frontend().prepare_window_interactive_resize(
+            &window,
+            geometry.size,
+            phase == WindowPlacementPhase::End,
+        );
     }
     state
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
+        .frontend_mut()
         .set_window_geometry_target(&window, geometry);
     window_management::queue_window_placement(state, &window, geometry, phase, change);
     if phase == WindowPlacementPhase::End {
@@ -1156,7 +1148,7 @@ fn apply_layout_move_placement(
     phase: WindowPlacementPhase,
 ) {
     let position = {
-        let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+        let frontend = state.frontend();
         match frontend.touch_gestures.gesture {
             Some(Gesture::Move { slot, origin, .. }) => {
                 if phase == WindowPlacementPhase::Begin {
@@ -1178,7 +1170,7 @@ fn apply_layout_move_placement(
         };
         super::input::release_client_geometry_for_shell_grab(state, window);
         window_management::activate_window(state, window, SERIAL_COUNTER.next_serial());
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         let geometry = frontend.window_geometry_target(window);
         frontend.touch_gestures.layout_move = Some(TileMoveGrab::new(
             smithay::input::pointer::GrabStartData {
@@ -1198,14 +1190,7 @@ fn apply_layout_move_placement(
         );
         return;
     }
-    let Some(mut grab) = state
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
-        .touch_gestures
-        .layout_move
-        .take()
-    else {
+    let Some(mut grab) = state.frontend_mut().touch_gestures.layout_move.take() else {
         return;
     };
     if phase == WindowPlacementPhase::End
@@ -1213,12 +1198,7 @@ fn apply_layout_move_placement(
     {
         grab.finish(state);
     } else {
-        state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
-            .touch_gestures
-            .layout_move = Some(grab);
+        state.frontend_mut().touch_gestures.layout_move = Some(grab);
     }
 }
 
@@ -1232,11 +1212,7 @@ fn apply_layout_resize_placement(
         WindowPlacementPhase::Begin => {
             super::input::release_client_geometry_for_shell_grab(state, window);
             window_management::activate_window(state, window, SERIAL_COUNTER.next_serial());
-            let geometry = state
-                .wayland
-                .as_ref()
-                .expect("missing Wayland frontend")
-                .window_geometry_target(window);
+            let geometry = state.frontend().window_geometry_target(window);
             window_management::queue_transient_window_placement(
                 state,
                 window,
@@ -1253,7 +1229,7 @@ fn apply_layout_resize_placement(
             let target = layout_pinch_target_size(geometry);
             let affected = resize_layout_window_toward(state, window, target);
             let placements = {
-                let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+                let frontend = state.frontend();
                 affected
                     .into_iter()
                     .map(|window| {
@@ -1273,11 +1249,7 @@ fn apply_layout_resize_placement(
             }
         }
         WindowPlacementPhase::End => {
-            let placements = state
-                .wayland
-                .as_ref()
-                .expect("missing Wayland frontend")
-                .layout_window_geometries(window);
+            let placements = state.frontend().layout_window_geometries(window);
             for (affected_window, geometry) in placements {
                 window_management::queue_transient_window_placement(
                     state,
@@ -1305,7 +1277,7 @@ fn resize_layout_window_toward(
         LayoutPinchEdge::Top,
     ] {
         let changed = {
-            let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+            let frontend = state.frontend_mut();
             let current = frontend.window_geometry_target(window);
             let (delta_x, delta_y) = layout_pinch_delta(edge, current.size, target);
             if delta_x == 0.0 && delta_y == 0.0 {

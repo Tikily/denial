@@ -93,7 +93,7 @@ use wayland_route::process_wayland_input_event;
 /// Cancel the whole client sequence before retiring any of its surface routes.
 /// wl_touch.cancel is client-wide, not a per-slot or per-surface event.
 pub(super) fn cancel_touch_for_surface(state: &mut RuntimeState, surface: &WlSurface) -> bool {
-    let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+    let frontend = state.frontend();
     let touch = frontend.seat.get_touch().expect("seat has no touch");
     let belongs_to_surface = |focus: &WlSurface| {
         let mut current = Some(focus.clone());
@@ -125,7 +125,7 @@ pub(super) fn cancel_touch_for_surface(state: &mut RuntimeState, surface: &WlSur
         touch.cancel(state);
         #[cfg(feature = "flutter")]
         {
-            let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+            let frontend = state.frontend_mut();
             frontend.client_touch_routes.clear();
             frontend.client_touch_frame_pending = false;
         }
@@ -406,7 +406,7 @@ pub(super) fn inject_shell_key_transition(
     let keycode = Keycode::new(stroke.evdev_keycode + XKB_KEYCODE_OFFSET);
     let seat_pressed = keyboard.pressed_keys().contains(&keycode);
     let accepted = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         route_shell_key_transition(
             &mut frontend.shell_keyboard_keys,
             keycode.raw(),
@@ -431,7 +431,7 @@ const EVDEV_KEY_BACK: u32 = 158;
 #[cfg(feature = "flutter")]
 pub(super) fn navigate_back(state: &mut RuntimeState, window: &smithay::desktop::Window) -> bool {
     let (keyboard, time, focused) = {
-        let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+        let frontend = state.frontend();
         let keyboard = frontend.seat.get_keyboard().expect("seat has no keyboard");
         let client = frontend
             .window_root_surface(window)
@@ -476,7 +476,7 @@ pub(crate) fn dispatch_shell_keyboard(
     command: &super::super::wire::KeyboardCommand,
 ) -> bool {
     let (keyboard, time) = {
-        let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+        let frontend = state.frontend();
         (
             frontend.seat.get_keyboard().expect("seat has no keyboard"),
             InputTime::now(),
@@ -487,7 +487,7 @@ pub(crate) fn dispatch_shell_keyboard(
     // use process_keyboard_transition() and the same seat dispatch.
     match command {
         super::super::wire::KeyboardCommand::DismissPanel { activation_serial } => {
-            let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+            let frontend = state.frontend_mut();
             frontend.text_input.dismiss_panel(*activation_serial);
             true
         }
@@ -495,7 +495,7 @@ pub(crate) fn dispatch_shell_keyboard(
             height,
             duration_ms,
         } => {
-            let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+            let frontend = state.frontend_mut();
             frontend.set_keyboard_height(*height, *duration_ms);
             true
         }
@@ -505,14 +505,14 @@ pub(crate) fn dispatch_shell_keyboard(
                 .any(|character| shell_text_key_stroke(character).is_none()) =>
         {
             // The keymap types ASCII only; an editor takes any text.
-            let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+            let frontend = state.frontend_mut();
             match frontend.commit_shell_keyboard_text(None, text) {
                 Some(delivered) => delivered,
                 None => type_shell_text(state, &keyboard, text, time),
             }
         }
         super::super::wire::KeyboardCommand::Replace { replaced, text } => {
-            let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+            let frontend = state.frontend_mut();
             match frontend.commit_shell_keyboard_text(Some(replaced), text) {
                 Some(true) => true,
                 Some(false) => {
@@ -1986,7 +1986,7 @@ pub(in super::super) fn install_keyboard_settings(
         i32::try_from(settings.repeat_delay_ms)?,
     );
     {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         #[cfg(feature = "flutter")]
         if let Some(compose) = frontend.flutter_compose.as_mut() {
             compose.reset();
@@ -2221,7 +2221,7 @@ pub(super) fn dispatch_focused_flutter_key(
 ) {
     let raw_keycode = key.raw_code().raw();
     let (dispatch, input_method_owns_repeat) = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         let dispatch = match key_state {
             KeyState::Pressed => {
                 frontend.flutter_keyboard_keys.insert(raw_keycode);
@@ -2237,7 +2237,7 @@ pub(super) fn dispatch_focused_flutter_key(
 
     let repeatable = matches!(key_state, KeyState::Pressed) && flutter_key_repeats(&key);
     let unicode = if matches!(key_state, KeyState::Pressed) {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         flutter_unicode_for_keysym(frontend.flutter_compose.as_mut(), key.modified_sym())
     } else {
         key.modified_sym().key_char().map(u32::from).unwrap_or(0)
@@ -2262,7 +2262,7 @@ pub(super) fn dispatch_focused_flutter_key(
 pub(super) fn leave_focused_flutter_keyboard(state: &mut RuntimeState) {
     cancel_flutter_repeat(state);
     let mut keys = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         std::mem::take(&mut frontend.flutter_keyboard_keys)
             .into_iter()
             .collect::<Vec<_>>()
@@ -2351,11 +2351,7 @@ fn start_flutter_repeat(state: &mut RuntimeState, keycode: u32) {
         TimeoutAction::ToDuration(interval)
     }) {
         Ok(token) => {
-            state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
-                .flutter_repeat_token = Some(token);
+            state.frontend_mut().flutter_repeat_token = Some(token);
         }
         Err(error) => {
             warn!(%error, "could not schedule Flutter keyboard repeat");
@@ -2424,11 +2420,7 @@ fn start_system_control_repeat(state: &mut RuntimeState, keycode: u32) {
         TimeoutAction::ToDuration(interval)
     }) {
         Ok(token) => {
-            state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
-                .flutter_repeat_token = Some(token);
+            state.frontend_mut().flutter_repeat_token = Some(token);
         }
         Err(error) => {
             warn!(%error, "could not schedule system-control keyboard repeat");
@@ -2956,7 +2948,7 @@ fn release_pointer_to_shell(state: &mut RuntimeState) {
     });
 
     let (mut pressed_buttons, time) = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         if let Some(window_id) = released_window_id {
             frontend.pointer_constraint_escape.release_window(window_id);
         }
@@ -2991,14 +2983,7 @@ fn release_pointer_to_shell(state: &mut RuntimeState) {
     if pointer.is_grabbed() {
         pointer.unset_grab(state, SERIAL_COUNTER.next_serial(), time);
     }
-    if had_grab
-        || !state
-            .wayland
-            .as_ref()
-            .expect("missing Wayland frontend")
-            .retired_pointer_buttons
-            .is_empty()
-    {
+    if had_grab || !state.frontend().retired_pointer_buttons.is_empty() {
         pointer.frame(state);
     }
     state.scene_sync.mark_dirty();
@@ -3096,14 +3081,12 @@ fn process_flutter_keyboard_transition(
 ) -> bool {
     let secure_locked = state.secure_session_locked();
     let keyboard = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_keyboard()
         .expect("seat has no keyboard");
     let consume_retired = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         retired_key_consumes_transition(
             &mut frontend.retired_keyboard_keys,
             keycode.raw(),

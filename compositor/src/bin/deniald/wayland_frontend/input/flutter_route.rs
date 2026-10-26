@@ -28,7 +28,7 @@ pub(in super::super) fn cancel_captured_touch_routes(
         return false;
     }
     let (flutter_slots, cancel_client, touch) = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         let flutter_slots = slots
             .iter()
             .copied()
@@ -67,7 +67,7 @@ fn claim_edge_swipe(
     use super::edge_swipe::EdgeSwipeDecision;
 
     let candidate = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         let Some(candidate) = frontend.edge_swipe_candidates.get(&slot).copied() else {
             return false;
         };
@@ -88,7 +88,7 @@ fn claim_edge_swipe(
     // other candidate.
     cancel_captured_touch_routes(state, &[slot]);
     let (down, current) = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         frontend.edge_swipe_candidates.clear();
         frontend.flutter_touch_slots.insert(slot);
         let scale = frontend.atlas_scale;
@@ -121,7 +121,7 @@ pub(super) fn process_flutter_input_event(
             let delta = motion.delta();
             let delta_unaccel = motion.delta_unaccel();
             let (position, target, relative) = {
-                let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                let frontend = state.frontend_mut();
                 frontend.set_pointer_cursor_visible(true);
                 let scale = frontend.atlas_scale.max(f64::EPSILON);
                 let delta = Point::from((delta.x / scale, delta.y / scale));
@@ -146,7 +146,7 @@ pub(super) fn process_flutter_input_event(
         InputEvent::PointerMotionAbsolute { event: motion, .. } => {
             let flutter_captured = state.flutter_input.pointer_captured();
             let (position, target) = {
-                let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                let frontend = state.frontend_mut();
                 frontend.set_pointer_cursor_visible(true);
                 let local = motion.position_transformed(frontend.desktop_bounds.size);
                 let position = frontend.clamp_pointer(local + frontend.desktop_bounds.loc.to_f64());
@@ -166,22 +166,16 @@ pub(super) fn process_flutter_input_event(
             route_pointer_button(state, button.button_code(), button.state(), button.time())
         }
         InputEvent::PointerAxis { event: axis, .. } => {
-            state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
-                .set_pointer_cursor_visible(true);
+            state.frontend_mut().set_pointer_cursor_visible(true);
             let pointer_grabbed = state
-                .wayland
-                .as_ref()
-                .expect("missing Wayland frontend")
+                .frontend()
                 .seat
                 .get_pointer()
                 .expect("seat has no pointer")
                 .is_grabbed();
             let flutter_captured = state.flutter_input.pointer_captured();
             let flutter_target = {
-                let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                let frontend = state.frontend_mut();
                 if secure_locked || flutter_captured {
                     true
                 } else if frontend.client_pointer_capture.is_some() {
@@ -193,13 +187,7 @@ pub(super) fn process_flutter_input_event(
             };
             if flutter_target && (secure_locked || !pointer_grabbed) {
                 state.synchronize_flutter_pointer_position();
-                let scroll_speed_factor = state
-                    .wayland
-                    .as_ref()
-                    .expect("missing Wayland frontend")
-                    .settings
-                    .touchpad()
-                    .scroll_speed_factor;
+                let scroll_speed_factor = state.frontend().settings.touchpad().scroll_speed_factor;
                 state
                     .flutter_input
                     .handle_with_scroll_speed_factor(&event, scroll_speed_factor);
@@ -215,14 +203,9 @@ pub(super) fn process_flutter_input_event(
         } => {
             let serial = SERIAL_COUNTER.next_serial();
             let slot = i32::from(touch_event.slot());
-            state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
-                .edge_swipe_candidates
-                .remove(&slot);
+            state.frontend_mut().edge_swipe_candidates.remove(&slot);
             let (position, scene_position, software_keyboard_touch, deck_touch) = {
-                let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                let frontend = state.frontend_mut();
                 let position = {
                     let (bounds, transform) = touch_device_mapping(frontend, &touch_event.device());
                     output_bound_absolute_position(touch_event, bounds, transform)
@@ -268,7 +251,7 @@ pub(super) fn process_flutter_input_event(
             let gesture = if deck_touch {
                 TouchGestureUpdate::default()
             } else {
-                let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                let frontend = state.frontend_mut();
                 frontend
                     .touch_gestures
                     .set_swipe_directions(swipe_directions);
@@ -297,15 +280,11 @@ pub(super) fn process_flutter_input_event(
             let target = if secure_locked || software_keyboard_touch {
                 InputTarget::Flutter
             } else {
-                state
-                    .wayland
-                    .as_mut()
-                    .expect("missing Wayland frontend")
-                    .input_target(position)
+                state.frontend_mut().input_target(position)
             };
             match target {
                 InputTarget::Flutter => {
-                    let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                    let frontend = state.frontend_mut();
                     if !software_keyboard_touch {
                         frontend.text_input.note_flutter_touch();
                     }
@@ -320,17 +299,10 @@ pub(super) fn process_flutter_input_event(
                 }
                 InputTarget::Client(route) => {
                     let scene_changed = activate_client_route(state, &route, serial);
-                    state
-                        .wayland
-                        .as_mut()
-                        .expect("missing Wayland frontend")
-                        .text_input
-                        .note_client_touch();
+                    state.frontend_mut().text_input.note_client_touch();
                     let (focus, location) = route.touch_at(position);
                     let touch = state
-                        .wayland
-                        .as_ref()
-                        .expect("missing Wayland frontend")
+                        .frontend()
                         .seat
                         .get_touch()
                         .expect("seat has no touch");
@@ -344,7 +316,7 @@ pub(super) fn process_flutter_input_event(
                             time: touch_event.time(),
                         },
                     );
-                    let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                    let frontend = state.frontend_mut();
                     frontend.client_touch_routes.insert(slot, route);
                     frontend.client_touch_frame_pending = true;
                     let candidate = frontend.input_layout.as_ref().and_then(|layout| {
@@ -370,7 +342,7 @@ pub(super) fn process_flutter_input_event(
         } => {
             let slot = i32::from(touch_event.slot());
             let (position, scene_position) = {
-                let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+                let frontend = state.frontend();
                 let position = {
                     let (bounds, transform) = touch_device_mapping(frontend, &touch_event.device());
                     output_bound_absolute_position(touch_event, bounds, transform)
@@ -393,30 +365,20 @@ pub(super) fn process_flutter_input_event(
             let gesture = if deck_contact {
                 TouchGestureUpdate::default()
             } else {
-                state
-                    .wayland
-                    .as_mut()
-                    .expect("missing Wayland frontend")
-                    .touch_gestures
-                    .motion_at(slot, position, touch_event.time().micros())
+                state.frontend_mut().touch_gestures.motion_at(
+                    slot,
+                    position,
+                    touch_event.time().micros(),
+                )
             };
             let gesture_consumed = gesture.consume;
             let flush_clients = apply_touch_gesture_update(state, gesture);
             if gesture_consumed {
                 return flush_clients;
             }
-            let flutter_target = state
-                .wayland
-                .as_ref()
-                .expect("missing Wayland frontend")
-                .flutter_touch_slots
-                .contains(&slot);
+            let flutter_target = state.frontend().flutter_touch_slots.contains(&slot);
             if flutter_target {
-                let scale = state
-                    .wayland
-                    .as_ref()
-                    .expect("missing Wayland frontend")
-                    .atlas_scale;
+                let scale = state.frontend().atlas_scale;
                 state.flutter_input.handle_touch_at(
                     &event,
                     scene_position.x * scale,
@@ -428,7 +390,7 @@ pub(super) fn process_flutter_input_event(
                 return true;
             }
             let focus = {
-                let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+                let frontend = state.frontend();
                 frontend
                     .client_touch_routes
                     .get(&slot)
@@ -436,9 +398,7 @@ pub(super) fn process_flutter_input_event(
             };
             if let Some((focus, location)) = focus {
                 let touch = state
-                    .wayland
-                    .as_ref()
-                    .expect("missing Wayland frontend")
+                    .frontend()
                     .seat
                     .get_touch()
                     .expect("seat has no touch");
@@ -451,11 +411,7 @@ pub(super) fn process_flutter_input_event(
                         time: touch_event.time(),
                     },
                 );
-                state
-                    .wayland
-                    .as_mut()
-                    .expect("missing Wayland frontend")
-                    .client_touch_frame_pending = true;
+                state.frontend_mut().client_touch_frame_pending = true;
                 true
             } else {
                 false
@@ -465,12 +421,7 @@ pub(super) fn process_flutter_input_event(
             event: touch_event, ..
         } => {
             let slot = i32::from(touch_event.slot());
-            state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
-                .edge_swipe_candidates
-                .remove(&slot);
+            state.frontend_mut().edge_swipe_candidates.remove(&slot);
             let deck_contact = state.input_deck.screen_gestures.contains(slot);
             if deck_contact {
                 let update =
@@ -488,9 +439,7 @@ pub(super) fn process_flutter_input_event(
                 TouchGestureUpdate::default()
             } else {
                 state
-                    .wayland
-                    .as_mut()
-                    .expect("missing Wayland frontend")
+                    .frontend_mut()
                     .touch_gestures
                     .up_at(slot, touch_event.time().micros())
             };
@@ -499,28 +448,19 @@ pub(super) fn process_flutter_input_event(
             if gesture_consumed {
                 return flush_clients;
             }
-            let flutter_target = state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
-                .flutter_touch_slots
-                .remove(&slot);
+            let flutter_target = state.frontend_mut().flutter_touch_slots.remove(&slot);
             if flutter_target {
                 state.flutter_input.handle(&event);
                 return false;
             }
             let client_target = state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
+                .frontend_mut()
                 .client_touch_routes
                 .remove(&slot)
                 .is_some();
             if client_target {
                 let touch = state
-                    .wayland
-                    .as_ref()
-                    .expect("missing Wayland frontend")
+                    .frontend()
                     .seat
                     .get_touch()
                     .expect("seat has no touch");
@@ -532,27 +472,15 @@ pub(super) fn process_flutter_input_event(
                         time: touch_event.time(),
                     },
                 );
-                state
-                    .wayland
-                    .as_mut()
-                    .expect("missing Wayland frontend")
-                    .client_touch_frame_pending = true;
+                state.frontend_mut().client_touch_frame_pending = true;
             }
             client_target
         }
         InputEvent::TouchFrame { .. }
-            if std::mem::take(
-                &mut state
-                    .wayland
-                    .as_mut()
-                    .expect("missing Wayland frontend")
-                    .client_touch_frame_pending,
-            ) =>
+            if std::mem::take(&mut state.frontend_mut().client_touch_frame_pending) =>
         {
             let touch = state
-                .wayland
-                .as_ref()
-                .expect("missing Wayland frontend")
+                .frontend()
                 .seat
                 .get_touch()
                 .expect("seat has no touch");
@@ -564,12 +492,7 @@ pub(super) fn process_flutter_input_event(
             event: touch_event, ..
         } => {
             let slot = i32::from(touch_event.slot());
-            state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
-                .edge_swipe_candidates
-                .remove(&slot);
+            state.frontend_mut().edge_swipe_candidates.remove(&slot);
             let deck_contact = state.input_deck.screen_gestures.contains(slot);
             if deck_contact {
                 let update =
@@ -587,9 +510,7 @@ pub(super) fn process_flutter_input_event(
                 TouchGestureUpdate::default()
             } else {
                 state
-                    .wayland
-                    .as_mut()
-                    .expect("missing Wayland frontend")
+                    .frontend_mut()
                     .touch_gestures
                     .cancel_at(slot, touch_event.time().micros())
             };
@@ -598,32 +519,23 @@ pub(super) fn process_flutter_input_event(
             if gesture_consumed {
                 return flush_clients;
             }
-            let flutter_target = state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
-                .flutter_touch_slots
-                .remove(&slot);
+            let flutter_target = state.frontend_mut().flutter_touch_slots.remove(&slot);
             if flutter_target {
                 state.flutter_input.handle(&event);
                 false
             } else if state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
+                .frontend_mut()
                 .client_touch_routes
                 .remove(&slot)
                 .is_some()
             {
                 let touch = state
-                    .wayland
-                    .as_ref()
-                    .expect("missing Wayland frontend")
+                    .frontend()
                     .seat
                     .get_touch()
                     .expect("seat has no touch");
                 touch.cancel(state);
-                let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                let frontend = state.frontend_mut();
                 frontend.client_touch_routes.clear();
                 frontend.client_touch_frame_pending = false;
                 true
@@ -675,9 +587,7 @@ pub(in super::super) fn route_pointer_motion(
         under.as_ref().map(|(surface, _)| &surface.0),
     );
     let pointer = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_pointer()
         .expect("seat has no pointer");
@@ -687,7 +597,7 @@ pub(in super::super) fn route_pointer_motion(
         // edge has cleared Smithay's focus, keep cursor state current without
         // constructing protocol events or consuming a serial per sample.
         {
-            let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+            let frontend = state.frontend_mut();
             frontend.pointer_location = position;
             frontend.set_routed_pointer_target(routed_target);
         }
@@ -715,7 +625,7 @@ pub(in super::super) fn route_pointer_motion(
         return true;
     }
     {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         frontend.pointer_location = position;
         frontend.set_routed_pointer_target(routed_target);
     }
@@ -755,9 +665,7 @@ pub(crate) fn reconcile_flutter_pointer_route(state: &mut RuntimeState) {
         return;
     }
     let pointer = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_pointer()
         .expect("seat has no pointer");
@@ -768,7 +676,7 @@ pub(crate) fn reconcile_flutter_pointer_route(state: &mut RuntimeState) {
     let flutter_captured = state.flutter_input.pointer_captured();
     let lifecycle_active = state.flutter_input.mouse_lifecycle_active();
     let (position, target, current_target, time) = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         let position = frontend.pointer_location;
         let target = if secure_locked || (flutter_captured && !frontend.clipboard_drag_active) {
             PointerMotionTarget::FLUTTER
@@ -927,13 +835,7 @@ pub(super) fn route_pointer_axis<E: PointerAxisEvent<LibinputInputBackend>>(
     let vertical_amount = event.amount(Axis::Vertical);
     let horizontal_v120 = event.amount_v120(Axis::Horizontal);
     let vertical_v120 = event.amount_v120(Axis::Vertical);
-    let scroll_speed_factor = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
-        .settings
-        .touchpad()
-        .scroll_speed_factor;
+    let scroll_speed_factor = state.frontend().settings.touchpad().scroll_speed_factor;
     let horizontal = logical_axis_scroll_delta(
         source,
         horizontal_amount,
@@ -964,9 +866,7 @@ pub(super) fn route_pointer_axis<E: PointerAxisEvent<LibinputInputBackend>>(
         }
     }
     let pointer = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_pointer()
         .expect("seat has no pointer");
@@ -987,13 +887,7 @@ fn dismiss_foreign_popup_grab(
     serial: Serial,
     time: InputTime,
 ) -> bool {
-    let Some(mut grab) = state
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
-        .client_popup_grab
-        .take()
-    else {
+    let Some(mut grab) = state.frontend_mut().client_popup_grab.take() else {
         return false;
     };
     if grab.has_ended() || !pointer.has_grab(grab.serial()) {
@@ -1003,11 +897,7 @@ fn dismiss_foreign_popup_grab(
         .current_grab()
         .and_then(|focus| focus.wl_surface().and_then(|surface| surface.client()));
     if owner.is_some() && owner == surface.client() {
-        state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
-            .client_popup_grab = Some(grab);
+        state.frontend_mut().client_popup_grab = Some(grab);
         return false;
     }
     grab.ungrab(PopupUngrabStrategy::All);
@@ -1024,15 +914,11 @@ pub(super) fn activate_client_route(
     let Some(target_window) = route.window.as_ref() else {
         if let Some(layer_root) = route.layer_root.as_ref() {
             let keyboard_focus = state
-                .wayland
-                .as_ref()
-                .expect("missing Wayland frontend")
+                .frontend()
                 .layer_keyboard_focus_for_surface(layer_root);
             if let Some(keyboard_focus) = keyboard_focus {
                 let keyboard = state
-                    .wayland
-                    .as_ref()
-                    .expect("missing Wayland frontend")
+                    .frontend()
                     .seat
                     .get_keyboard()
                     .expect("seat has no keyboard");
@@ -1047,24 +933,17 @@ pub(super) fn activate_client_route(
         return false;
     };
     let keyboard = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_keyboard()
         .expect("seat has no keyboard");
-    let Some(keyboard_focus) = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
-        .keyboard_focus_for_window(target_window)
-    else {
+    let Some(keyboard_focus) = state.frontend().keyboard_focus_for_window(target_window) else {
         // Client-owned popup windows still receive the pointer/touch event,
         // but must not replace their managed owner's activation or focus.
         return false;
     };
     let scene_changed = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         let mut changed = frontend.space.elements().next_back() != Some(target_window);
         // Always offer the raise to XWM too: Space may already be correct
         // while Xwayland's independent X stack is stale.
@@ -1096,7 +975,7 @@ pub(in super::super) fn release_client_geometry_for_shell_grab(
         super::super::window_management::clear_client_geometry_constraints(window);
 
     let target = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         // The layout owns a tiled window's geometry and places it again below.
         // The geometry it had before it was tiled is kept for when it leaves
         // the layout and is never its size meanwhile: told that size first, a
@@ -1133,7 +1012,7 @@ pub(in super::super) fn release_client_geometry_for_shell_grab(
         return;
     };
     // A tiled window's client is told only where the layout puts it.
-    let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+    let frontend = state.frontend_mut();
     let target = if frontend.window_is_layout_managed(window) {
         frontend.arrange_layout_windows();
         frontend.window_geometry_target(window)
@@ -1200,9 +1079,7 @@ pub(super) fn begin_local_super_pointer_grab(
         }
     };
     state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_pointer()
         .expect("seat has no pointer")
@@ -1228,14 +1105,10 @@ pub(super) fn begin_super_pointer_grab(
         return false;
     }
     release_client_geometry_for_shell_grab(state, &window);
-    let layout_managed = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
-        .window_is_layout_managed(&window);
+    let layout_managed = state.frontend().window_is_layout_managed(&window);
     if layout_managed {
         let (position, geometry) = {
-            let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+            let frontend = state.frontend();
             (
                 frontend.pointer_location,
                 frontend.window_geometry_target(&window),
@@ -1248,9 +1121,7 @@ pub(super) fn begin_super_pointer_grab(
         };
         activate_client_route(state, route, serial);
         state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
+            .frontend_mut()
             .set_compositor_pointer_grab_active(true);
         super::super::queue_transient_window_placement(
             state,
@@ -1263,9 +1134,7 @@ pub(super) fn begin_super_pointer_grab(
             },
         );
         let pointer = state
-            .wayland
-            .as_ref()
-            .expect("missing Wayland frontend")
+            .frontend()
             .seat
             .get_pointer()
             .expect("seat has no pointer");
@@ -1291,7 +1160,7 @@ pub(super) fn begin_super_pointer_grab(
         return true;
     }
     let (position, initial_location, geometry) = {
-        let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+        let frontend = state.frontend();
         (
             frontend.pointer_location,
             frontend.space.element_location(&window).unwrap_or_default(),
@@ -1306,14 +1175,10 @@ pub(super) fn begin_super_pointer_grab(
 
     activate_client_route(state, route, serial);
     state
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
+        .frontend_mut()
         .set_compositor_pointer_grab_active(true);
     let pointer = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_pointer()
         .expect("seat has no pointer");
@@ -1352,9 +1217,7 @@ pub(super) fn begin_super_pointer_grab(
             });
             if !prepared {
                 state
-                    .wayland
-                    .as_mut()
-                    .expect("missing Wayland frontend")
+                    .frontend_mut()
                     .set_compositor_pointer_grab_active(false);
                 return false;
             }
@@ -1384,18 +1247,12 @@ pub(super) fn process_wayland_keyboard_transition(
     #[cfg(not(feature = "flutter"))]
     focus_exclusive_layer_for_keyboard_event(state);
     let keyboard = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_keyboard()
         .expect("seat has no keyboard");
     let consume_retired = retired_key_consumes_transition(
-        &mut state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
-            .retired_keyboard_keys,
+        &mut state.frontend_mut().retired_keyboard_keys,
         keycode.raw(),
         key_state,
     );
@@ -1427,41 +1284,27 @@ pub(in super::super) fn route_pointer_button(
 ) -> bool {
     let secure_locked = state.secure_session_locked();
     let serial = SERIAL_COUNTER.next_serial();
-    state
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
-        .set_pointer_cursor_visible(true);
+    state.frontend_mut().set_pointer_cursor_visible(true);
     state
         .native_escape_shortcut
         .note_pointer_button(button_state == ButtonState::Pressed);
     if retired_pointer_button_consumes_transition(
-        &mut state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
-            .retired_pointer_buttons,
+        &mut state.frontend_mut().retired_pointer_buttons,
         button_code,
         button_state,
     ) {
         return true;
     }
     let pointer = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_pointer()
         .expect("seat has no pointer");
     let pointer_grabbed = pointer.is_grabbed();
     let flutter_captured = state.flutter_input.pointer_captured();
-    let clipboard_drag_active = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
-        .clipboard_drag_active;
+    let clipboard_drag_active = state.frontend().clipboard_drag_active;
     let (target, local_window_region) = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         let target = if secure_locked || (flutter_captured && !frontend.clipboard_drag_active) {
             InputTarget::Flutter
         } else if let Some(route) = frontend.client_pointer_capture.clone() {
@@ -1488,9 +1331,7 @@ pub(in super::super) fn route_pointer_button(
     };
     if button_state == ButtonState::Released {
         state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
+            .frontend_mut()
             .forget_client_pointer_button(button_code);
     }
     // SUPER is compositor-owned and deliberately never enters the
@@ -1516,11 +1357,7 @@ pub(in super::super) fn route_pointer_button(
     };
     if began_super_grab {
         update_pressed_buttons(
-            &mut state
-                .wayland
-                .as_mut()
-                .expect("missing Wayland frontend")
-                .wayland_pointer_buttons,
+            &mut state.frontend_mut().wayland_pointer_buttons,
             button_code,
             ButtonState::Pressed,
         );
@@ -1541,9 +1378,7 @@ pub(in super::super) fn route_pointer_button(
         && button_state == ButtonState::Pressed
         && let InputTarget::Client(route) = &target
         && state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
+            .frontend_mut()
             .resume_pointer_constraint_for_route(route)
     {
         state.scene_sync.mark_dirty();
@@ -1563,7 +1398,7 @@ pub(in super::super) fn route_pointer_button(
         );
     }
     if matches!(&target, InputTarget::Flutter) {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         match button_state {
             ButtonState::Pressed if button_code == BTN_LEFT => {
                 frontend.flutter_pointer_press = Some(FlutterPointerPress {
@@ -1592,11 +1427,7 @@ pub(in super::super) fn route_pointer_button(
         state
             .flutter_input
             .handle_pointer_button(button_code, button_state);
-        state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
-            .set_clipboard_drag_active(false);
+        state.frontend_mut().set_clipboard_drag_active(false);
     }
     match target {
         InputTarget::Flutter if secure_locked || !pointer_grabbed => {
@@ -1610,7 +1441,7 @@ pub(in super::super) fn route_pointer_button(
             if button_state == ButtonState::Pressed
                 && let InputTarget::Client(route) = &target
             {
-                let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                let frontend = state.frontend_mut();
                 frontend.remember_client_pointer_press(route, serial, button_code);
                 if !pointer_grabbed {
                     frontend.client_pointer_capture = Some(route.clone());
@@ -1619,11 +1450,7 @@ pub(in super::super) fn route_pointer_button(
                 }
             }
             update_pressed_buttons(
-                &mut state
-                    .wayland
-                    .as_mut()
-                    .expect("missing Wayland frontend")
-                    .wayland_pointer_buttons,
+                &mut state.frontend_mut().wayland_pointer_buttons,
                 button_code,
                 button_state,
             );
@@ -1638,7 +1465,7 @@ pub(in super::super) fn route_pointer_button(
             );
             pointer.frame(state);
             if button_state == ButtonState::Released {
-                let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                let frontend = state.frontend_mut();
                 frontend.client_pointer_buttons.remove(&button_code);
                 if frontend.client_pointer_buttons.is_empty() && !pointer.is_grabbed() {
                     frontend.client_pointer_capture = None;

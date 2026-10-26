@@ -461,12 +461,7 @@ pub(super) fn clear_keyboard_focus(
     let had_focus = keyboard.current_focus().is_some();
     keyboard.set_focus(state, None, serial);
     if had_focus && keyboard.current_focus().is_none() {
-        let seat = state
-            .wayland
-            .as_ref()
-            .expect("missing Wayland frontend")
-            .seat
-            .clone();
+        let seat = state.frontend().seat.clone();
         <RuntimeState as SeatHandler>::focus_changed(state, &seat, None);
     }
 }
@@ -488,11 +483,7 @@ pub(super) fn request_keyboard_focus(
         .as_ref()
         .is_some_and(|frontend| frontend.text_input.shell_captures_keyboard())
     {
-        state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
-            .shell_keyboard_focus = focus;
+        state.frontend_mut().shell_keyboard_focus = focus;
         return;
     }
     keyboard.set_focus(state, focus, serial);
@@ -501,20 +492,14 @@ pub(super) fn request_keyboard_focus(
 #[cfg(feature = "flutter")]
 pub(in super::super) fn suspend_keyboard_focus_for_shell(state: &mut RuntimeState) {
     let keyboard = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_keyboard()
         .expect("seat has no keyboard");
     let focus = keyboard
         .current_focus()
         .filter(|focus| focus.alive() && !matches!(focus, KeyboardFocusTarget::Flutter));
-    state
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
-        .shell_keyboard_focus = focus;
+    state.frontend_mut().shell_keyboard_focus = focus;
 
     keyboard.set_focus(
         state,
@@ -537,16 +522,12 @@ pub(in super::super) fn suspend_keyboard_focus_for_shell(state: &mut RuntimeStat
 #[cfg(feature = "flutter")]
 pub(in super::super) fn restore_shell_keyboard_focus(state: &mut RuntimeState) {
     let keyboard = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .seat
         .get_keyboard()
         .expect("seat has no keyboard");
     let focus = state
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
+        .frontend_mut()
         .shell_keyboard_focus
         .take()
         .filter(IsAlive::alive);

@@ -107,7 +107,7 @@ where
     E: TabletToolEvent<LibinputInputBackend>,
 {
     let (tablet_seat, display_handle) = {
-        let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+        let frontend = state.frontend();
         (frontend.seat.tablet_seat(), frontend.display_handle.clone())
     };
     let descriptor = event.tool();
@@ -147,12 +147,7 @@ fn tablet_focus(
     Option<ClientInputRoute>,
 ) {
     if state.flutter_active {
-        let route = state
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
-            .input_route(position)
-            .cloned();
+        let route = state.frontend_mut().input_route(position).cloned();
         let focus = route
             .as_ref()
             .map(|route| route.focus_at(position))
@@ -160,9 +155,7 @@ fn tablet_focus(
         return (focus, route);
     }
     let focus = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .surface_under(position)
         .map(|(surface, location)| (surface.0, location));
     (focus, None)
@@ -174,9 +167,7 @@ fn tablet_focus(
     position: Point<f64, Logical>,
 ) -> (Option<(WlSurface, Point<f64, Logical>)>, Option<()>) {
     let focus = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
+        .frontend()
         .surface_under(position)
         .map(|(surface, location)| (surface.0, location));
     (focus, None)
@@ -198,7 +189,7 @@ where
     E: TabletToolEvent<LibinputInputBackend>,
 {
     let position = {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         tablet_position(frontend, event)?
     };
     let tool = tool_handle(state, event);
@@ -207,7 +198,7 @@ where
     let time = event.time();
     if tool.current_tablet().is_none() {
         let (tablet_seat, display_handle) = {
-            let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+            let frontend = state.frontend();
             (frontend.seat.tablet_seat(), frontend.display_handle.clone())
         };
         let descriptor = TabletDescriptor::from(&event.device());
@@ -238,7 +229,7 @@ where
         );
     }
     {
-        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = state.frontend_mut();
         frontend.pointer_location = position;
         #[cfg(feature = "flutter")]
         if _route.is_some() {
@@ -261,7 +252,7 @@ pub(super) fn register_device(state: &mut RuntimeState, device: &LibinputDevice)
         return false;
     }
     let (tablet_seat, display_handle) = {
-        let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+        let frontend = state.frontend();
         (frontend.seat.tablet_seat(), frontend.display_handle.clone())
     };
     tablet_seat.add_wp_tablet(&display_handle, &TabletDescriptor::from(device));
@@ -278,20 +269,13 @@ pub(super) fn unregister_device(state: &mut RuntimeState, device: &LibinputDevic
     if !Device::has_capability(device, DeviceCapability::TabletTool) {
         return false;
     }
-    let tablet_seat = state
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
-        .seat
-        .tablet_seat();
+    let tablet_seat = state.frontend().seat.tablet_seat();
     tablet_seat.remove_tablet(&TabletDescriptor::from(device));
     if tablet_seat.count_tablets() == 0 {
         tablet_seat.clear_tools();
     }
     state
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
+        .frontend_mut()
         .tablet_output_mappings
         .remove(device.sysname());
     info!(
@@ -316,12 +300,7 @@ pub(super) fn process_event(
             _ => None,
         };
         if let Some((tool, time)) = tool {
-            let tablet_seat = state
-                .wayland
-                .as_ref()
-                .expect("missing Wayland frontend")
-                .seat
-                .tablet_seat();
+            let tablet_seat = state.frontend().seat.tablet_seat();
             if let Some(handle) = tablet_seat.get_tool(&tool) {
                 if handle.current_tablet().is_some() {
                     let serial = SERIAL_COUNTER.next_serial();
@@ -351,7 +330,7 @@ pub(super) fn process_event(
                 false
             }
             ProximityState::Out => {
-                let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                let frontend = state.frontend_mut();
                 let tool = frontend.seat.tablet_seat().get_tool(&event.tool());
                 frontend
                     .tablet_output_mappings
@@ -394,9 +373,7 @@ pub(super) fn process_event(
                     #[cfg(not(feature = "flutter"))]
                     {
                         let window = state
-                            .wayland
-                            .as_ref()
-                            .expect("missing Wayland frontend")
+                            .frontend()
                             .space
                             .element_under(result.position)
                             .map(|(window, _)| window.clone());

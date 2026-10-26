@@ -374,22 +374,17 @@ impl WaylandFrontend {
 
 impl KeyboardShortcutsInhibitHandler for RuntimeState {
     fn keyboard_shortcuts_inhibit_state(&mut self) -> &mut KeyboardShortcutsInhibitState {
-        &mut self
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
-            .shortcuts_inhibit
-            .state
+        &mut self.frontend_mut().shortcuts_inhibit.state
     }
 
     fn new_inhibitor(&mut self, inhibitor: KeyboardShortcutsInhibitor) {
-        let frontend = self.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = self.frontend_mut();
         frontend.shortcuts_inhibit.inhibitors.push(inhibitor);
         frontend.refresh_shortcuts_inhibit();
     }
 
     fn inhibitor_destroyed(&mut self, inhibitor: KeyboardShortcutsInhibitor) {
-        let frontend = self.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = self.frontend_mut();
         frontend
             .shortcuts_inhibit
             .inhibitors

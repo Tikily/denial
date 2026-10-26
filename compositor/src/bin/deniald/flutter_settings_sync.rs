@@ -169,7 +169,7 @@ pub(super) fn synchronize_settings(
                     result
                 };
                 let (revision, document) = {
-                    let frontend = events.wayland.as_mut().expect("missing Wayland frontend");
+                    let frontend = events.frontend_mut();
                     if result.is_ok() {
                         // The native-owned values are unchanged, but their
                         // revision token advanced with the shared document.
@@ -220,22 +220,11 @@ pub(super) fn synchronize_settings(
                     .prepare_keyboard_update(expected_revision, keyboard);
                 let result = match prepared {
                     Ok(prepared) => {
-                        let previous = events
-                            .wayland
-                            .as_ref()
-                            .expect("missing Wayland frontend")
-                            .settings
-                            .keyboard()
-                            .clone();
+                        let previous = events.frontend().settings.keyboard().clone();
                         let next = prepared.keyboard().clone();
                         match wayland_frontend::install_keyboard_settings(events, &next) {
                             Ok(_) => {
-                                let commit = events
-                                    .wayland
-                                    .as_mut()
-                                    .expect("missing Wayland frontend")
-                                    .settings
-                                    .commit(prepared);
+                                let commit = events.frontend_mut().settings.commit(prepared);
                                 if let Err(error) = commit {
                                     if let Err(rollback_error) =
                                         wayland_frontend::install_keyboard_settings(
@@ -250,12 +239,7 @@ pub(super) fn synchronize_settings(
                                     Err(error)
                                 } else {
                                     info!(
-                                        revision = events
-                                            .wayland
-                                            .as_ref()
-                                            .expect("missing Wayland frontend")
-                                            .settings
-                                            .revision(),
+                                        revision = events.frontend().settings.revision(),
                                         layouts = next.layouts.len(),
                                         repeat_rate_hz = next.repeat_rate_hz,
                                         repeat_delay_ms = next.repeat_delay_ms,
@@ -308,22 +292,11 @@ pub(super) fn synchronize_settings(
                     .prepare_touchpad_update(expected_revision, touchpad);
                 let result = match prepared {
                     Ok(prepared) => {
-                        let previous = events
-                            .wayland
-                            .as_ref()
-                            .expect("missing Wayland frontend")
-                            .settings
-                            .touchpad()
-                            .clone();
+                        let previous = events.frontend().settings.touchpad().clone();
                         let next = prepared.touchpad().clone();
                         match wayland_frontend::install_touchpad_settings(events, &next) {
                             Ok(()) => {
-                                let commit = events
-                                    .wayland
-                                    .as_mut()
-                                    .expect("missing Wayland frontend")
-                                    .settings
-                                    .commit(prepared);
+                                let commit = events.frontend_mut().settings.commit(prepared);
                                 if let Err(error) = commit {
                                     if let Err(rollback_error) =
                                         wayland_frontend::install_touchpad_settings(
@@ -338,12 +311,7 @@ pub(super) fn synchronize_settings(
                                     Err(error)
                                 } else {
                                     info!(
-                                        revision = events
-                                            .wayland
-                                            .as_ref()
-                                            .expect("missing Wayland frontend")
-                                            .settings
-                                            .revision(),
+                                        revision = events.frontend().settings.revision(),
                                         tap_to_click = next.tap_to_click_enabled,
                                         natural_scroll = next.natural_scroll_enabled,
                                         scroll_speed_factor = next.scroll_speed_factor,
@@ -404,22 +372,11 @@ pub(super) fn synchronize_settings(
                     .prepare_mouse_update(expected_revision, mouse);
                 let result = match prepared {
                     Ok(prepared) => {
-                        let previous = events
-                            .wayland
-                            .as_ref()
-                            .expect("missing Wayland frontend")
-                            .settings
-                            .mouse()
-                            .clone();
+                        let previous = events.frontend().settings.mouse().clone();
                         let next = prepared.mouse().clone();
                         match wayland_frontend::install_mouse_settings(events, &next) {
                             Ok(()) => {
-                                let commit = events
-                                    .wayland
-                                    .as_mut()
-                                    .expect("missing Wayland frontend")
-                                    .settings
-                                    .commit(prepared);
+                                let commit = events.frontend_mut().settings.commit(prepared);
                                 if let Err(error) = commit {
                                     if let Err(rollback_error) =
                                         wayland_frontend::install_mouse_settings(events, &previous)
@@ -432,12 +389,7 @@ pub(super) fn synchronize_settings(
                                     Err(error)
                                 } else {
                                     info!(
-                                        revision = events
-                                            .wayland
-                                            .as_ref()
-                                            .expect("missing Wayland frontend")
-                                            .settings
-                                            .revision(),
+                                        revision = events.frontend().settings.revision(),
                                         speed = next.speed,
                                         "applied persistent mouse settings"
                                     );
@@ -621,7 +573,7 @@ fn synchronize_external_settings(
         previous_cursor_policy,
         previous_cursor_size,
     ) = {
-        let frontend = events.wayland.as_ref().expect("missing Wayland frontend");
+        let frontend = events.frontend();
         (
             frontend.settings.keyboard().clone(),
             frontend.settings.mouse().clone(),
@@ -670,12 +622,7 @@ fn synchronize_external_settings(
         return;
     }
 
-    let commit = events
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
-        .settings
-        .commit(prepared);
+    let commit = events.frontend_mut().settings.commit(prepared);
     if let Err(error) = commit {
         rollback_external_native_settings(
             events,
@@ -693,7 +640,8 @@ fn synchronize_external_settings(
         return;
     }
 
-    let frontend = events.wayland.as_mut().expect("missing Wayland frontend");
+    events.input_device_capabilities_changed = true;
+    let frontend = events.frontend_mut();
     if previous_cursor_policy != frontend.settings.allow_client_cursor_surfaces() {
         frontend.queue_cursor_policy_update();
     }
@@ -704,7 +652,6 @@ fn synchronize_external_settings(
     }
     // Even unchanged native sections carry the shared document revision.
     frontend.keyboard_configuration_changed = true;
-    events.input_device_capabilities_changed = true;
     info!(
         revision = frontend.settings.revision(),
         path = %frontend.settings.path().display(),
@@ -1051,22 +998,10 @@ fn apply_control_keyboard(
         .settings
         .prepare_keyboard_update(expected_revision, keyboard)
         .map_err(control_conflict)?;
-    let previous = events
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
-        .settings
-        .keyboard()
-        .clone();
+    let previous = events.frontend().settings.keyboard().clone();
     let next = prepared.keyboard().clone();
     wayland_frontend::install_keyboard_settings(events, &next).map_err(control_failed)?;
-    if let Err(error) = events
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
-        .settings
-        .commit(prepared)
-    {
+    if let Err(error) = events.frontend_mut().settings.commit(prepared) {
         wayland_frontend::install_keyboard_settings(events, &previous).map_err(control_failed)?;
         return Err(control_failed(error));
     }
@@ -1087,22 +1022,10 @@ fn apply_control_touchpad(
         .settings
         .prepare_touchpad_update(expected_revision, touchpad)
         .map_err(control_conflict)?;
-    let previous = events
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
-        .settings
-        .touchpad()
-        .clone();
+    let previous = events.frontend().settings.touchpad().clone();
     let next = prepared.touchpad().clone();
     wayland_frontend::install_touchpad_settings(events, &next).map_err(control_failed)?;
-    if let Err(error) = events
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
-        .settings
-        .commit(prepared)
-    {
+    if let Err(error) = events.frontend_mut().settings.commit(prepared) {
         wayland_frontend::install_touchpad_settings(events, &previous).map_err(control_failed)?;
         return Err(control_failed(error));
     }
@@ -1125,22 +1048,10 @@ fn apply_control_mouse(
         .settings
         .prepare_mouse_update(expected_revision, mouse)
         .map_err(control_conflict)?;
-    let previous = events
-        .wayland
-        .as_ref()
-        .expect("missing Wayland frontend")
-        .settings
-        .mouse()
-        .clone();
+    let previous = events.frontend().settings.mouse().clone();
     let next = prepared.mouse().clone();
     wayland_frontend::install_mouse_settings(events, &next).map_err(control_failed)?;
-    if let Err(error) = events
-        .wayland
-        .as_mut()
-        .expect("missing Wayland frontend")
-        .settings
-        .commit(prepared)
-    {
+    if let Err(error) = events.frontend_mut().settings.commit(prepared) {
         wayland_frontend::install_mouse_settings(events, &previous).map_err(control_failed)?;
         return Err(control_failed(error));
     }
@@ -1279,12 +1190,7 @@ pub(super) fn apply_shortcut_update(
                 events.native_escape_shortcut = previous_engine;
             } else {
                 info!(
-                    revision = events
-                        .wayland
-                        .as_ref()
-                        .expect("missing Wayland frontend")
-                        .shortcuts
-                        .revision(),
+                    revision = events.frontend().shortcuts.revision(),
                     "applied persistent shortcut configuration"
                 );
             }

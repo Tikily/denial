@@ -124,11 +124,7 @@ impl WaylandFrontend {
 
 impl WlrLayerShellHandler for RuntimeState {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
-        &mut self
-            .wayland
-            .as_mut()
-            .expect("missing Wayland frontend")
-            .layer_shell_state
+        &mut self.frontend_mut().layer_shell_state
     }
 
     fn new_layer_surface(
@@ -138,7 +134,7 @@ impl WlrLayerShellHandler for RuntimeState {
         _layer: WlrLayer,
         namespace: String,
     ) {
-        let frontend = self.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = self.frontend_mut();
         let output = requested_output
             .as_ref()
             .and_then(Output::from_resource)
@@ -174,7 +170,7 @@ impl WlrLayerShellHandler for RuntimeState {
     }
 
     fn new_popup(&mut self, parent: WlrLayerSurface, popup: PopupSurface) {
-        let frontend = self.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = self.frontend_mut();
         let popup_surface = popup.wl_surface().clone();
         // XdgShellHandler::new_popup already tracks every XDG popup. At that
         // point a layer-shell popup is still parentless, so PopupManager keeps
@@ -192,7 +188,7 @@ impl WlrLayerShellHandler for RuntimeState {
 
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
         super::input::cancel_touch_for_surface(self, surface.wl_surface());
-        let frontend = self.wayland.as_mut().expect("missing Wayland frontend");
+        let frontend = self.frontend_mut();
         for output in &frontend.outputs {
             let mut map = layer_map_for_output(&output.output);
             let Some(layer) = map

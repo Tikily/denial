@@ -194,7 +194,7 @@ pub(in super::super) fn synchronize_input_deck(
                 }
                 if current.active_output != output {
                     cancel_screen_gestures(state);
-                    let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                    let frontend = state.frontend_mut();
                     frontend.input_deck_output = output
                         .as_ref()
                         .and_then(|name| {
@@ -215,12 +215,12 @@ pub(in super::super) fn synchronize_input_deck(
                 || state.input_deck.screen_gestures.blocks_input() => {}
             command => {
                 state.note_user_activity();
-                let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
+                let frontend = state.frontend();
                 let time = InputTime::now();
                 match command {
                     Command::Motion { dx, dy } => {
                         let captured = state.flutter_input.pointer_captured();
-                        let frontend = state.wayland.as_mut().expect("missing Wayland frontend");
+                        let frontend = state.frontend_mut();
                         frontend.set_pointer_cursor_visible(true);
                         let delta = Point::from((dx, dy));
                         let position = frontend.clamp_pointer(frontend.pointer_location + delta);
@@ -311,13 +311,11 @@ pub(in super::super) fn synchronize_input_deck(
                             && (captured
                                 || (!client_capture
                                     && state
-                                        .wayland
-                                        .as_mut()
-                                        .expect("missing Wayland frontend")
+                                        .frontend_mut()
                                         .input_route(pointer_location)
                                         .is_none()));
-                        let frontend = state.wayland.as_ref().expect("missing Wayland frontend");
                         state.input_deck.scrolling = !stop;
+                        let frontend = state.frontend();
                         let speed = frontend.settings.touchpad().scroll_speed_factor;
                         if flutter_target {
                             state.synchronize_flutter_pointer_position();
@@ -419,12 +417,7 @@ pub(in super::super) fn synchronize_input_deck(
                 mods.latched,
                 mods.locked,
                 mods.layout_effective,
-                state
-                    .wayland
-                    .as_ref()
-                    .expect("missing Wayland frontend")
-                    .settings
-                    .revision(),
+                state.frontend().settings.revision(),
             )
         });
     let changed = runtime.input_deck_snapshot.as_ref().is_none_or(|previous| {

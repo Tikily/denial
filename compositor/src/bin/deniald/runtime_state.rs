@@ -314,6 +314,16 @@ pub(super) struct PendingShellAction {
 }
 
 impl RuntimeState {
+    /// The Wayland frontend, for code that only runs once it exists: Wayland
+    /// requests and the work they cause.
+    pub(super) fn frontend(&self) -> &wayland_frontend::WaylandFrontend {
+        self.wayland.as_ref().expect("missing Wayland frontend")
+    }
+
+    pub(super) fn frontend_mut(&mut self) -> &mut wayland_frontend::WaylandFrontend {
+        self.wayland.as_mut().expect("missing Wayland frontend")
+    }
+
     pub(super) fn client_activation_permitted(&self) -> bool {
         #[cfg(feature = "flutter")]
         {
