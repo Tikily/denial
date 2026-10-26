@@ -194,9 +194,11 @@ pub(super) fn apply_resident_mode_topology(
         swapchain,
         topology,
         current_configuration,
-        resident_outputs,
-        staged_configuration,
-        flutter_runtime::OutputGeometryTransition::Immediate,
+        ResidentGeometry {
+            outputs: resident_outputs,
+            configuration: staged_configuration,
+            transition: flutter_runtime::OutputGeometryTransition::Immediate,
+        },
         events,
         flutter,
     ) {

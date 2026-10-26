@@ -91,9 +91,6 @@ mod options;
 #[path = "deniald/orientation_sensor.rs"]
 mod orientation_sensor;
 #[cfg(feature = "flutter")]
-#[path = "deniald/text_prediction.rs"]
-mod text_prediction;
-#[cfg(feature = "flutter")]
 #[path = "deniald/output_control.rs"]
 mod output_control;
 #[path = "deniald/output_policy.rs"]
@@ -139,6 +136,9 @@ mod startup;
 mod surface_feedback;
 #[path = "deniald/system_controls.rs"]
 mod system_controls;
+#[cfg(feature = "flutter")]
+#[path = "deniald/text_prediction.rs"]
+mod text_prediction;
 #[cfg(feature = "flutter")]
 #[path = "deniald/touchpad_gestures.rs"]
 mod touchpad_gestures;
@@ -263,13 +263,12 @@ use flutter_service_sync::{
 use flutter_session::{
     ActiveOutputConfirmation, FlutterReloadOutcome, begin_output_confirmation,
     cancel_active_screenshot, install_ready_fence_watch, install_sampled_buffer_releases,
-    quiesce_flutter_page_flips, reload_flutter_runtime, screenshot_buffer_modifier,
-    screenshot_composite_sources, submit_ready_frames,
+    screenshot_buffer_modifier, screenshot_composite_sources, submit_ready_frames,
 };
 #[cfg(feature = "flutter")]
 use flutter_settings_sync::{
-    apply_automatic_orientation, apply_resident_output_geometry, send_flutter_window_event,
-    synchronize_fingerprint_unlock, synchronize_flutter_window_commands,
+    ResidentGeometry, apply_automatic_orientation, apply_resident_output_geometry,
+    send_flutter_window_event, synchronize_fingerprint_unlock, synchronize_flutter_window_commands,
     synchronize_flutter_window_management, synchronize_resident_flutter_geometry_state,
     synchronize_settings, synchronize_system_bar_configuration,
 };

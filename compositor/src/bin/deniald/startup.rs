@@ -427,15 +427,17 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
             &seat_name,
             drm_fd.clone(),
             render_fd.clone(),
-            options.xwayland,
-            options.work_area.clone(),
-            output_configuration.scrolling_layout_axes.clone(),
-            settings
-                .take()
-                .expect("Wayland settings were loaded before frontend startup"),
-            shortcuts
-                .take()
-                .expect("Wayland shortcuts were loaded before frontend startup"),
+            wayland_frontend::FrontendConfig {
+                xwayland_enabled: options.xwayland,
+                work_area: options.work_area.clone(),
+                scrolling_layout_axes: output_configuration.scrolling_layout_axes.clone(),
+                settings: settings
+                    .take()
+                    .expect("Wayland settings were loaded before frontend startup"),
+                shortcuts: shortcuts
+                    .take()
+                    .expect("Wayland shortcuts were loaded before frontend startup"),
+            },
         )?;
         let x11_display = frontend.xdisplay_name();
         info!(

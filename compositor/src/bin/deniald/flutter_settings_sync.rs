@@ -1134,10 +1134,12 @@ pub(super) fn send_input_device_settings(
     runtime.send_input_device_capabilities_response(
         request_id,
         frontend.settings.revision(),
-        !events.touchpad_devices.is_empty(),
-        frontend.settings.touchpad(),
-        !events.mouse_devices.is_empty(),
-        frontend.settings.mouse(),
+        wire::InputDeviceSettings {
+            has_touchpad: !events.touchpad_devices.is_empty(),
+            touchpad: frontend.settings.touchpad(),
+            has_mouse: !events.mouse_devices.is_empty(),
+            mouse: frontend.settings.mouse(),
+        },
         error,
     )
 }
@@ -1206,9 +1208,11 @@ pub(super) fn apply_automatic_orientation(
         swapchain,
         topology,
         configuration,
-        outputs,
-        staged_configuration,
-        flutter_runtime::OutputGeometryTransition::AnimatedRotation,
+        ResidentGeometry {
+            outputs,
+            configuration: staged_configuration,
+            transition: flutter_runtime::OutputGeometryTransition::AnimatedRotation,
+        },
         events,
         flutter,
     )?;
@@ -1219,19 +1223,29 @@ pub(super) fn apply_automatic_orientation(
     Ok(())
 }
 
+/// Output geometry for the resident Flutter pools to adopt in place.
 #[cfg(feature = "flutter")]
-#[allow(clippy::too_many_arguments)]
+pub(super) struct ResidentGeometry {
+    pub(super) outputs: Vec<ConnectedOutput>,
+    pub(super) configuration: RuntimeOutputConfiguration,
+    pub(super) transition: flutter_runtime::OutputGeometryTransition,
+}
+
+#[cfg(feature = "flutter")]
 pub(super) fn apply_resident_output_geometry(
     scanouts: &mut [Scanout],
     swapchain: &mut RenderSwapchains,
     topology: &mut TopologyManager,
     configuration: &mut RuntimeOutputConfiguration,
-    outputs: Vec<ConnectedOutput>,
-    staged_configuration: RuntimeOutputConfiguration,
-    transition: flutter_runtime::OutputGeometryTransition,
+    geometry: ResidentGeometry,
     events: &mut RuntimeState,
     flutter: &mut flutter_runtime::FlutterRuntime,
 ) -> Result<(), Box<dyn Error>> {
+    let ResidentGeometry {
+        outputs,
+        configuration: staged_configuration,
+        transition,
+    } = geometry;
     let previous_snapshot = topology.snapshot();
     let previous_atlas = AtlasPlan::for_snapshot(&previous_snapshot)
         .ok_or("resident output rollback has no previous Flutter desktop geometry")?;

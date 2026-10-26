@@ -12,9 +12,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use smithay::reexports::rustix::{io, ioctl};
 
-#[cfg(feature = "flutter")]
-use smithay::backend::egl::EGLContext;
-
 const SCANOUT_BYTES_PER_PIXEL: u64 = 4;
 const MAX_SCANOUT_DIMENSION: u32 = 16_384;
 const MAX_SCANOUT_POOL_BYTES: u64 = 1024 * 1024 * 1024;
@@ -1322,7 +1319,6 @@ impl FlutterLauncher {
         self.start_with_targets(renderer, output_swapchains, scanouts, snapshot, atlas, None)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn start_with_targets(
         &mut self,
         renderer: &GlesRenderer,
@@ -1347,19 +1343,13 @@ impl FlutterLauncher {
             );
             self.replace_factory(ui_development::UiRuntimeMode::OfficialOptimized)?;
         }
-        let refresh_millihz = scanouts
-            .iter()
-            .map(|scanout| OutputMode::from(scanout.output.mode).refresh)
-            .max()
-            .ok_or("Flutter runtime has no output refresh")?;
         let using_prepared = prepared.is_some();
         let runtime = self.start_with_current_factory(
-            renderer.egl_context(),
-            flutter_render_target_pools(output_swapchains),
+            renderer,
+            output_swapchains,
+            scanouts,
             snapshot,
             atlas,
-            scanouts,
-            u32::try_from(refresh_millihz)?,
             prepared,
         );
         let mut runtime = match runtime {
@@ -1381,12 +1371,11 @@ impl FlutterLauncher {
                     return Err(error);
                 }
                 self.start_with_current_factory(
-                    renderer.egl_context(),
-                    flutter_render_target_pools(output_swapchains),
+                    renderer,
+                    output_swapchains,
+                    scanouts,
                     snapshot,
                     atlas,
-                    scanouts,
-                    u32::try_from(refresh_millihz)?,
                     None,
                 )?
             }
@@ -1398,15 +1387,13 @@ impl FlutterLauncher {
         Ok(runtime)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn start_with_current_factory<'a>(
+    fn start_with_current_factory(
         &self,
-        shared_context: &EGLContext,
-        output_pools: impl IntoIterator<Item = flutter_runtime::OutputRenderTargetPool<'a>>,
+        renderer: &GlesRenderer,
+        output_swapchains: &OutputSwapchains,
+        scanouts: &[Scanout],
         snapshot: &TopologySnapshot,
         atlas: &AtlasPlan,
-        scanouts: &[Scanout],
-        refresh_millihz: u32,
         prepared: Option<flutter_runtime::PreparedFlutterRenderer>,
     ) -> Result<flutter_runtime::FlutterRuntime, Box<dyn Error>> {
         if let Some(scanout) = scanouts
@@ -1419,24 +1406,33 @@ impl FlutterLauncher {
             )
             .into());
         }
-        flutter_runtime::FlutterRuntime::start(
-            shared_context,
-            output_pools,
-            snapshot,
-            atlas,
-            refresh_millihz,
-            self.offscreen_blit,
-            self.factory
+        let refresh_millihz = scanouts
+            .iter()
+            .map(|scanout| OutputMode::from(scanout.output.mode).refresh)
+            .max()
+            .ok_or("Flutter runtime has no output refresh")?;
+        let launch = flutter_runtime::FlutterLaunch {
+            factory: self
+                .factory
                 .as_ref()
                 .ok_or("Flutter launcher has no active runtime factory")?,
-            self.events.clone(),
-            Arc::clone(&self.authentication),
-            self.clipboard.clone(),
-            self.work_area.clone(),
-            self.generation,
-            self.wayland_display.clone(),
-            self.x11_display.clone(),
-            self.output_control_socket.clone(),
+            generation: self.generation,
+            offscreen_blit: self.offscreen_blit,
+            events: self.events.clone(),
+            authentication: Arc::clone(&self.authentication),
+            clipboard: self.clipboard.clone(),
+            work_area: self.work_area.clone(),
+            wayland_display: self.wayland_display.clone(),
+            x11_display: self.x11_display.clone(),
+            output_control_socket: self.output_control_socket.clone(),
+        };
+        flutter_runtime::FlutterRuntime::start(
+            launch,
+            renderer.egl_context(),
+            flutter_render_target_pools(output_swapchains),
+            snapshot,
+            atlas,
+            u32::try_from(refresh_millihz)?,
             prepared,
         )
     }

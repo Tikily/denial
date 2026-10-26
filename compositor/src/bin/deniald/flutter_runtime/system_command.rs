@@ -355,23 +355,16 @@ impl SystemCommandHandler {
         launch: PendingApplicationLaunch,
         activation_token: Option<&str>,
     ) -> Result<(), DispatchError> {
-        let display = self
-            .wayland_display
-            .as_deref()
-            .ok_or(DispatchError::WaylandUnavailable)?;
+        let session = self.session_environment()?;
         let executable = launch.arguments[0].clone();
-        let application_environment = self.application_environment();
-        let cursor_size = self.cursor_size();
         let pid = launch_application(
-            &launch.arguments,
-            launch.desktop_file_id.as_deref(),
-            launch.launch_request_id,
-            activation_token,
-            display,
-            self.x11_display.as_deref(),
-            self.output_control_socket.as_deref(),
-            cursor_size,
-            &application_environment,
+            ApplicationLaunch {
+                arguments: &launch.arguments,
+                desktop_file_id: launch.desktop_file_id.as_deref(),
+                launch_request_id: launch.launch_request_id,
+                activation_token,
+            },
+            &session,
         )?;
         info!(pid, executable, "launched application from Flutter shell");
         Ok(())
@@ -405,32 +398,38 @@ impl SystemCommandHandler {
         desktop_file_id: Option<&str>,
         activation_token: Option<&str>,
     ) -> Result<(), DispatchError> {
-        let display = self
-            .wayland_display
-            .as_deref()
-            .ok_or(DispatchError::WaylandUnavailable)?;
+        let session = self.session_environment()?;
         if !shell {
             expand_shortcut_program_home(&mut arguments[0]);
         }
         let executable = arguments[0].clone();
-        let application_environment = self.application_environment();
-        let cursor_size = self.cursor_size();
         let pid = launch_application(
-            &arguments,
-            desktop_file_id,
-            None,
-            activation_token,
-            display,
-            self.x11_display.as_deref(),
-            self.output_control_socket.as_deref(),
-            cursor_size,
-            &application_environment,
+            ApplicationLaunch {
+                arguments: &arguments,
+                desktop_file_id,
+                launch_request_id: None,
+                activation_token,
+            },
+            &session,
         )?;
         info!(
             pid,
             executable, shell, desktop_file_id, "launched command from shortcut"
         );
         Ok(())
+    }
+
+    fn session_environment(&self) -> Result<SessionEnvironment<'_>, DispatchError> {
+        Ok(SessionEnvironment {
+            wayland_display: self
+                .wayland_display
+                .as_deref()
+                .ok_or(DispatchError::WaylandUnavailable)?,
+            x11_display: self.x11_display.as_deref(),
+            output_control_socket: self.output_control_socket.as_deref(),
+            cursor_size: self.cursor_size(),
+            application: self.application_environment(),
+        })
     }
 
     fn application_environment(&self) -> ApplicationEnvironment {
@@ -642,16 +641,26 @@ fn dispatch_startup_launch(launch: impl FnOnce() + Send + 'static) -> io::Result
         .map(|_| ())
 }
 
-fn launch_application(
-    arguments: &[String],
-    desktop_file_id: Option<&str>,
+/// One application to start, and how the shell asked for it.
+struct ApplicationLaunch<'a> {
+    arguments: &'a [String],
+    desktop_file_id: Option<&'a str>,
     launch_request_id: Option<NonZeroU64>,
-    activation_token: Option<&str>,
-    wayland_display: &OsStr,
-    x11_display: Option<&OsStr>,
-    output_control_socket: Option<&OsStr>,
+    activation_token: Option<&'a str>,
+}
+
+/// What every application started from this session inherits.
+struct SessionEnvironment<'a> {
+    wayland_display: &'a OsStr,
+    x11_display: Option<&'a OsStr>,
+    output_control_socket: Option<&'a OsStr>,
     cursor_size: u32,
-    application_environment: &ApplicationEnvironment,
+    application: ApplicationEnvironment,
+}
+
+fn launch_application(
+    launch: ApplicationLaunch<'_>,
+    session: &SessionEnvironment<'_>,
 ) -> Result<u32, DispatchError> {
     // Start the reaper first. If the system cannot create that one persistent
     // thread, no process is launched that Denial would be unable to reap.
@@ -662,8 +671,13 @@ fn launch_application(
     let permit = LAUNCH_LIMITER
         .try_acquire()
         .ok_or(DispatchError::ApplicationLimitReached)?;
-    let discovered_xmodifiers = x11_display
-        .filter(|_| application_environment.allows_discovered_xmodifiers(desktop_file_id))
+    let discovered_xmodifiers = session
+        .x11_display
+        .filter(|_| {
+            session
+                .application
+                .allows_discovered_xmodifiers(launch.desktop_file_id)
+        })
         .and_then(|display| match discover_xim_modifier(display) {
             Ok(modifier) => modifier,
             Err(error) => {
@@ -672,16 +686,9 @@ fn launch_application(
             }
         });
     let mut command = application_command(
-        arguments,
-        launch_request_id,
-        activation_token,
-        wayland_display,
-        x11_display,
-        output_control_socket,
+        launch,
+        session,
         std::env::var_os("QT_QPA_PLATFORMTHEME").as_deref(),
-        cursor_size,
-        application_environment,
-        desktop_file_id,
         discovered_xmodifiers.as_deref().map(OsStr::new),
     );
     let child = command.spawn().map_err(DispatchError::Spawn)?;
@@ -761,18 +768,24 @@ mod startup_launch_tests {
 }
 
 fn application_command(
-    arguments: &[String],
-    launch_request_id: Option<NonZeroU64>,
-    activation_token: Option<&str>,
-    wayland_display: &OsStr,
-    x11_display: Option<&OsStr>,
-    output_control_socket: Option<&OsStr>,
+    launch: ApplicationLaunch<'_>,
+    session: &SessionEnvironment<'_>,
     qt_platform_theme: Option<&OsStr>,
-    cursor_size: u32,
-    application_environment: &ApplicationEnvironment,
-    desktop_file_id: Option<&str>,
     discovered_xmodifiers: Option<&OsStr>,
 ) -> Command {
+    let ApplicationLaunch {
+        arguments,
+        desktop_file_id,
+        launch_request_id,
+        activation_token,
+    } = launch;
+    let SessionEnvironment {
+        wayland_display,
+        x11_display,
+        output_control_socket,
+        cursor_size,
+        application: application_environment,
+    } = session;
     let mut command = Command::new(&arguments[0]);
     // Command inherits the user session environment intentionally: PATH,
     // locale, TERM/COLORTERM, HOME, XDG data/config roots and toolkit settings

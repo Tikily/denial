@@ -720,21 +720,123 @@ impl Session<'_, '_> {
                 warn!(%error, "could not restore DRM gamma state during shutdown");
             }
         }
-        quiesce_flutter_page_flips(
-            self.flutter,
-            &mut self.scheduler,
-            self.drm,
-            self.swapchain,
-            self.scanouts,
-            self.event_loop,
-            &mut self.events,
-            restore_framebuffer,
-        );
+        self.quiesce_flutter_page_flips(restore_framebuffer);
         self.scheduler.shutdown_volition();
         self.flutter
             .shutdown()
             .map_err(|error| format!("Flutter engine shutdown failed: {error}"))?;
         Ok(())
+    }
+
+    /// Drains submitted page flips before teardown, then hands DRM master
+    /// back when `release_drm_master` asks for it.
+    fn quiesce_flutter_page_flips(&mut self, release_drm_master: bool) {
+        let Self {
+            flutter: runtime,
+            scheduler,
+            drm,
+            swapchain,
+            scanouts,
+            event_loop,
+            events,
+            ..
+        } = self;
+        const PAGE_FLIP_DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
+        const MAX_DISPATCH_SLICE: Duration = Duration::from_millis(20);
+
+        let deadline = Instant::now() + PAGE_FLIP_DRAIN_TIMEOUT;
+        while scheduler.has_submitted() && drm.is_active() {
+            let now = Instant::now();
+            if now >= deadline {
+                warn!(
+                    timeout_ms = PAGE_FLIP_DRAIN_TIMEOUT.as_millis(),
+                    "KMS page flips did not quiesce during shutdown; releasing DRM master without atomic restore"
+                );
+                drm.pause();
+                break;
+            }
+
+            if let Err(error) = event_loop.dispatch(
+                MAX_DISPATCH_SLICE.min(deadline.saturating_duration_since(now)),
+                events,
+            ) {
+                warn!(
+                    %error,
+                    "event dispatch failed while draining shutdown page flips; releasing DRM master"
+                );
+                drm.pause();
+                return;
+            }
+            if let Err(error) = service_session_lifecycle(
+                drm,
+                scanouts,
+                &**swapchain,
+                event_loop,
+                events,
+                Some(deadline),
+            ) {
+                warn!(
+                    %error,
+                    "session transition failed while draining shutdown page flips; releasing DRM master"
+                );
+                drm.pause();
+                return;
+            }
+            if let Err(error) = install_sampled_buffer_releases(event_loop, events) {
+                warn!(%error, "could not install sampled-buffer release fence during shutdown");
+                drm.pause();
+                return;
+            }
+            if !drm.is_active() {
+                break;
+            }
+            if events.scanout_rebased {
+                // Resume establishes a synchronous scanout state and invalidates
+                // every pre-pause scheduler ownership record. Teardown does not
+                // need to rebuild the runtime: release master and let the next
+                // compositor establish its own modeset.
+                warn!("KMS session was rebased during shutdown; skipping atomic restore");
+                drm.pause();
+                break;
+            }
+            if let Some(error) = events.error.take() {
+                warn!(
+                    error,
+                    "DRM event failed while draining shutdown page flips; skipping atomic restore"
+                );
+                drm.pause();
+                break;
+            }
+            let Some(output_swapchains) = swapchain.outputs_mut() else {
+                warn!("shutdown retirement lost its physical output pools");
+                drm.pause();
+                return;
+            };
+            if let Err(error) = scheduler.retire_completions_for_shutdown(
+                runtime,
+                output_swapchains,
+                scanouts,
+                events,
+            ) {
+                warn!(
+                    %error,
+                    "page-flip retirement failed during shutdown; releasing DRM master"
+                );
+                drm.pause();
+                return;
+            }
+        }
+
+        if release_drm_master && drm.is_active() {
+            // Closing a full display-manager session is an ownership handoff,
+            // not a temporary KMS experiment. Release the device before Flutter
+            // destroys its contexts and buffers; the display manager will
+            // establish its own mode when logind activates it.
+            // KmsContext::restore_once observes the inactive device and deliberately
+            // skips every blocking atomic ioctl.
+            drm.pause();
+            info!("released DRM master for graphical-session handoff");
+        }
     }
 }
 

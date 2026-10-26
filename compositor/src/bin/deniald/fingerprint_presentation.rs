@@ -807,18 +807,20 @@ impl Controller {
         let profile = self.profile.as_ref().ok_or("fingerprint profile missing")?;
         runtime.set_fingerprint_scene(
             output,
-            self.layout_epoch,
-            black,
-            visible,
-            self.reveal_home,
-            self.fade_target,
-            [
-                profile.x as f64,
-                profile.y as f64,
-                profile.width as f64,
-                profile.height as f64,
-            ],
-            [profile.panel_width as f64, profile.panel_height as f64],
+            crate::flutter_runtime::FingerprintLayout {
+                epoch: self.layout_epoch,
+                black,
+                image: visible,
+                reveal: self.reveal_home,
+                fade: self.fade_target,
+                rectangle: [
+                    profile.x as f64,
+                    profile.y as f64,
+                    profile.width as f64,
+                    profile.height as f64,
+                ],
+                panel: [profile.panel_width as f64, profile.panel_height as f64],
+            },
         )?;
         self.layout_key = Some(key);
         Ok(true)

@@ -1262,7 +1262,6 @@ fn x11_error<E: fmt::Display>(context: &'static str) -> impl FnOnce(E) -> XEmbed
     move |error| XEmbedTrayError(format!("{context}: {error}"))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn rgba_from_ximage(
     connection: &RustConnection,
     screen_index: usize,

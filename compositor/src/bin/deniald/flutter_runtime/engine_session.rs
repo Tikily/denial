@@ -127,26 +127,43 @@ impl PreparedFlutterRenderer {
     }
 }
 
+/// The launcher's half of an engine start: which bundle runs, and the session
+/// services the engine stays wired to for its whole life.
+pub(crate) struct FlutterLaunch<'a> {
+    pub(crate) factory: &'a FlutterRuntimeFactory,
+    pub(crate) generation: u64,
+    pub(crate) offscreen_blit: bool,
+    pub(crate) events: Sender<RuntimeEvent>,
+    pub(crate) authentication: Arc<crate::authentication::AuthenticationController>,
+    pub(crate) clipboard: crate::clipboard::ClipboardManager,
+    pub(crate) work_area: crate::options::WorkAreaOptions,
+    pub(crate) wayland_display: Option<OsString>,
+    pub(crate) x11_display: Option<OsString>,
+    pub(crate) output_control_socket: Option<OsString>,
+}
+
 impl FlutterRuntime {
-    #[allow(clippy::too_many_arguments)]
-    pub fn start<'a>(
+    pub(crate) fn start<'a>(
+        launch: FlutterLaunch<'_>,
         shared_context: &EGLContext,
         output_pools: impl IntoIterator<Item = OutputRenderTargetPool<'a>>,
         snapshot: &TopologySnapshot,
         atlas: &AtlasPlan,
         refresh_millihz: u32,
-        offscreen_blit: bool,
-        factory: &FlutterRuntimeFactory,
-        events: Sender<RuntimeEvent>,
-        authentication: Arc<crate::authentication::AuthenticationController>,
-        clipboard: crate::clipboard::ClipboardManager,
-        work_area: crate::options::WorkAreaOptions,
-        generation: u64,
-        wayland_display: Option<OsString>,
-        x11_display: Option<OsString>,
-        output_control_socket: Option<OsString>,
         prepared: Option<PreparedFlutterRenderer>,
     ) -> Result<Self, Box<dyn Error>> {
+        let FlutterLaunch {
+            factory,
+            generation,
+            offscreen_blit,
+            events,
+            authentication,
+            clipboard,
+            work_area,
+            wayland_display,
+            x11_display,
+            output_control_socket,
+        } = launch;
         let wire = WireBridge::new(snapshot, atlas, work_area)?;
         let render_outputs = atlas
             .render_outputs(snapshot)

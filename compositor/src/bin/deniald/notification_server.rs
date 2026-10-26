@@ -307,7 +307,7 @@ impl NotificationsInterface {
     }
 
     #[zbus(name = "Notify", out_args("id"))]
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, reason = "the D-Bus Notify signature")]
     async fn notify(
         &self,
         app_name: String,
@@ -783,7 +783,7 @@ fn effective_timeout(notification: &Notification) -> Option<Duration> {
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, reason = "the D-Bus Notify arguments")]
 fn normalize_notification(
     sender: String,
     app_name: String,

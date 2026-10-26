@@ -463,17 +463,5 @@ pub(super) fn publish_software_keyboard_state(
     runtime: &mut flutter_runtime::FlutterRuntime,
     events: &RuntimeState,
 ) -> Result<(), Box<dyn Error>> {
-    let keyboard = events
-        .wayland
-        .as_ref()
-        .map(|frontend| frontend.software_keyboard_state())
-        .unwrap_or_default();
-    runtime.publish_text_input_state(
-        keyboard.active,
-        keyboard.input_panel_visible,
-        keyboard.legacy,
-        keyboard.content_hint,
-        keyboard.content_purpose,
-        keyboard.activation_serial,
-    )
+    runtime.publish_text_input_state(events.frontend().software_keyboard_state())
 }

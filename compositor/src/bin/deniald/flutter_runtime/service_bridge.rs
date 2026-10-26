@@ -40,7 +40,10 @@ impl FlutterRuntime {
         self.wire.take_text_prediction_request()
     }
 
-    pub fn send_text_prediction(&mut self, prediction: &wire::TextPrediction) -> Result<(), Box<dyn Error>> {
+    pub fn send_text_prediction(
+        &mut self,
+        prediction: &wire::TextPrediction,
+    ) -> Result<(), Box<dyn Error>> {
         let engine = self
             .host
             .as_ref()
@@ -327,21 +330,8 @@ impl FlutterRuntime {
 
     pub fn publish_text_input_state(
         &mut self,
-        active: bool,
-        input_panel_visible: bool,
-        legacy: bool,
-        content_hint: u32,
-        content_purpose: u32,
-        activation_serial: u64,
+        state: crate::wayland_frontend::SoftwareKeyboardState,
     ) -> Result<(), Box<dyn Error>> {
-        let state = (
-            active,
-            input_panel_visible,
-            legacy,
-            content_hint,
-            content_purpose,
-            activation_serial,
-        );
         if self.published_text_input_state == Some(state) {
             return Ok(());
         }
@@ -350,14 +340,7 @@ impl FlutterRuntime {
             .as_ref()
             .expect("Flutter runtime is shutting down")
             .engine();
-        let update = self.wire.encode_text_input_state(
-            active,
-            input_panel_visible,
-            legacy,
-            content_hint,
-            content_purpose,
-            activation_serial,
-        )?;
+        let update = self.wire.encode_text_input_state(state)?;
         engine.send_platform_message(wire::TO_FLUTTER_CHANNEL, update)?;
         self.published_text_input_state = Some(state);
         Ok(())
@@ -414,10 +397,7 @@ impl FlutterRuntime {
         &mut self,
         request_id: u64,
         revision: u64,
-        has_touchpad: bool,
-        touchpad: &crate::settings::TouchpadSettings,
-        has_mouse: bool,
-        mouse: &crate::settings::MouseSettings,
+        devices: wire::InputDeviceSettings<'_>,
         error: Option<&str>,
     ) -> Result<(), Box<dyn Error>> {
         let engine = self
@@ -425,15 +405,9 @@ impl FlutterRuntime {
             .as_ref()
             .expect("Flutter runtime is shutting down")
             .engine();
-        let response = self.wire.encode_input_device_capabilities_response(
-            request_id,
-            revision,
-            has_touchpad,
-            touchpad,
-            has_mouse,
-            mouse,
-            error,
-        )?;
+        let response = self
+            .wire
+            .encode_input_device_capabilities_response(request_id, revision, devices, error)?;
         engine.send_platform_message(wire::TO_FLUTTER_CHANNEL, response)?;
         Ok(())
     }

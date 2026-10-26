@@ -309,14 +309,19 @@ impl WireBridge {
         Ok(self.outbound_builder.finished_data())
     }
 
-    pub fn encode_text_prediction(&mut self, prediction: &TextPrediction) -> Result<&[u8], WireError> {
+    pub fn encode_text_prediction(
+        &mut self,
+        prediction: &TextPrediction,
+    ) -> Result<&[u8], WireError> {
         let strings = std::iter::once(&prediction.word)
             .chain(&prediction.correction)
             .chain(&prediction.suggestions)
             .chain(&prediction.languages);
         if prediction.suggestions.len() > MAX_PREDICTION_SUGGESTIONS
             || prediction.languages.len() > 8
-            || strings.into_iter().any(|value| value.len() > MAX_STRING_BYTES)
+            || strings
+                .into_iter()
+                .any(|value| value.len() > MAX_STRING_BYTES)
         {
             return Err(WireError::Payload);
         }
@@ -324,7 +329,10 @@ impl WireBridge {
         let builder = &mut self.outbound_builder;
         builder.reset();
         let word = builder.create_string(&prediction.word);
-        let correction = prediction.correction.as_deref().map(|value| builder.create_string(value));
+        let correction = prediction
+            .correction
+            .as_deref()
+            .map(|value| builder.create_string(value));
         let suggestions: Vec<_> = prediction
             .suggestions
             .iter()
@@ -364,28 +372,14 @@ impl WireBridge {
 
     pub fn encode_text_input_state(
         &mut self,
-        active: bool,
-        input_panel_visible: bool,
-        legacy: bool,
-        content_hint: u32,
-        content_purpose: u32,
-        activation_serial: u64,
+        state: SoftwareKeyboardState,
     ) -> Result<&[u8], WireError> {
-        if input_panel_visible && !active {
+        if state.input_panel_visible && !state.active {
             return Err(WireError::Payload);
         }
         let sequence = self.take_sequence();
         self.outbound_builder.reset();
-        encode_text_input_state(
-            &mut self.outbound_builder,
-            sequence,
-            active,
-            input_panel_visible,
-            legacy,
-            content_hint,
-            content_purpose,
-            activation_serial,
-        )?;
+        encode_text_input_state(&mut self.outbound_builder, sequence, state)?;
         Ok(self.outbound_builder.finished_data())
     }
 
@@ -454,14 +448,8 @@ impl WireBridge {
             &mut self.outbound_builder,
             sequence,
             request_id,
-            fb::SettingsResponseKind::Document,
             revision,
-            document,
-            None,
-            &[],
-            0,
-            None,
-            None,
+            SettingsPayload::Document(document),
             error,
         )?;
         Ok(self.outbound_builder.finished_data())
@@ -471,12 +459,15 @@ impl WireBridge {
         &mut self,
         request_id: u64,
         revision: u64,
-        has_touchpad: bool,
-        touchpad: &TouchpadSettings,
-        has_mouse: bool,
-        mouse: &MouseSettings,
+        devices: InputDeviceSettings<'_>,
         error: Option<&str>,
     ) -> Result<&[u8], WireError> {
+        let InputDeviceSettings {
+            has_touchpad,
+            touchpad,
+            has_mouse,
+            mouse,
+        } = devices;
         if revision == 0 || error.is_some_and(|error| error.len() > MAX_STRING_BYTES) {
             return Err(WireError::Identity);
         }
@@ -531,7 +522,6 @@ impl WireBridge {
         Ok(self.outbound_builder.finished_data())
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn encode_keyboard_settings_response(
         &mut self,
         request_id: u64,
@@ -555,14 +545,12 @@ impl WireBridge {
             &mut self.outbound_builder,
             sequence,
             request_id,
-            fb::SettingsResponseKind::Keyboard,
             revision,
-            None,
-            Some(keyboard),
-            display_names,
-            active_layout,
-            None,
-            None,
+            SettingsPayload::Keyboard {
+                keyboard,
+                display_names,
+                active_layout,
+            },
             error,
         )?;
         Ok(self.outbound_builder.finished_data())
@@ -623,14 +611,12 @@ impl WireBridge {
             &mut self.outbound_builder,
             sequence,
             request_id,
-            fb::SettingsResponseKind::Shortcuts,
             revision,
-            None,
-            None,
-            &[],
-            0,
-            Some((shortcuts, supported_inputs, plugin_actions)),
-            None,
+            SettingsPayload::Shortcuts {
+                bindings: shortcuts,
+                inputs: supported_inputs,
+                plugin_actions,
+            },
             error,
         )?;
         Ok(self.outbound_builder.finished_data())
@@ -651,14 +637,8 @@ impl WireBridge {
             &mut self.outbound_builder,
             sequence,
             request_id,
-            fb::SettingsResponseKind::ShortcutValidation,
             revision,
-            None,
-            None,
-            &[],
-            0,
-            None,
-            Some(validation),
+            SettingsPayload::ShortcutValidation(validation),
             None,
         )?;
         Ok(self.outbound_builder.finished_data())
@@ -1143,13 +1123,16 @@ fn encode_cursor_position(
 fn encode_text_input_state(
     builder: &mut FlatBufferBuilder<'_>,
     sequence: u64,
-    active: bool,
-    input_panel_visible: bool,
-    legacy: bool,
-    content_hint: u32,
-    content_purpose: u32,
-    activation_serial: u64,
+    state: SoftwareKeyboardState,
 ) -> Result<(), WireError> {
+    let SoftwareKeyboardState {
+        active,
+        input_panel_visible,
+        legacy,
+        content_hint,
+        content_purpose,
+        activation_serial,
+    } = state;
     let state = fb::TextInputState::create(
         builder,
         &fb::TextInputStateArgs {
@@ -1175,28 +1158,71 @@ fn encode_text_input_state(
     validate_finished_message(builder)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The one section a settings response carries; it also names the kind.
+enum SettingsPayload<'a> {
+    Document(Option<&'a str>),
+    Keyboard {
+        keyboard: &'a KeyboardSettings,
+        display_names: &'a [String],
+        active_layout: usize,
+    },
+    Shortcuts {
+        bindings: &'a [ShortcutBinding],
+        inputs: &'a [ShortcutInputDefinition],
+        plugin_actions: &'a crate::plugin_actions::ActionCatalog,
+    },
+    ShortcutValidation(&'a ShortcutValidation),
+}
+
 fn encode_settings_response(
     builder: &mut FlatBufferBuilder<'_>,
     sequence: u64,
     request_id: u64,
-    kind: fb::SettingsResponseKind,
     revision: u64,
-    document: Option<&str>,
-    keyboard: Option<&KeyboardSettings>,
-    display_names: &[String],
-    active_layout: usize,
-    shortcut_configuration: Option<(
-        &[ShortcutBinding],
-        &[ShortcutInputDefinition],
-        &crate::plugin_actions::ActionCatalog,
-    )>,
-    shortcut_validation: Option<&ShortcutValidation>,
+    payload: SettingsPayload<'_>,
     error: Option<&str>,
 ) -> Result<(), WireError> {
+    let (kind, document, keyboard, shortcut_configuration, shortcut_validation) = match payload {
+        SettingsPayload::Document(document) => (
+            fb::SettingsResponseKind::Document,
+            document,
+            None,
+            None,
+            None,
+        ),
+        SettingsPayload::Keyboard {
+            keyboard,
+            display_names,
+            active_layout,
+        } => (
+            fb::SettingsResponseKind::Keyboard,
+            None,
+            Some((keyboard, display_names, active_layout)),
+            None,
+            None,
+        ),
+        SettingsPayload::Shortcuts {
+            bindings,
+            inputs,
+            plugin_actions,
+        } => (
+            fb::SettingsResponseKind::Shortcuts,
+            None,
+            None,
+            Some((bindings, inputs, plugin_actions)),
+            None,
+        ),
+        SettingsPayload::ShortcutValidation(validation) => (
+            fb::SettingsResponseKind::ShortcutValidation,
+            None,
+            None,
+            None,
+            Some(validation),
+        ),
+    };
     let document = document.map(|document| builder.create_string(document));
     let error = error.map(|error| builder.create_string(error));
-    let keyboard = keyboard.map(|keyboard| {
+    let keyboard = keyboard.map(|(keyboard, display_names, active_layout)| {
         let mut layouts = Vec::with_capacity(keyboard.layouts.len());
         for (layout, display_name) in keyboard.layouts.iter().zip(display_names) {
             let name = builder.create_string(&layout.layout);

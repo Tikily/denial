@@ -65,7 +65,6 @@ impl FlutterGlHandler {
         self.generation = generation;
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(in crate::flutter_runtime) fn new<'a>(
         render_context: egl_context::SharedEglContext,
         resource_context: egl_context::SharedEglContext,

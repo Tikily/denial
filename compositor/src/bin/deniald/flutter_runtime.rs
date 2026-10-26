@@ -55,6 +55,7 @@ use super::wire::{self, WireBridge};
 
 #[path = "flutter_runtime/fingerprint_scene.rs"]
 mod fingerprint_scene;
+pub(crate) use fingerprint_scene::FingerprintLayout;
 #[path = "flutter_runtime/lock_frame.rs"]
 mod lock_frame;
 #[path = "flutter_runtime/mouse_cursor.rs"]
@@ -74,7 +75,7 @@ mod cursor_bridge;
 mod damage;
 #[path = "flutter_runtime/engine_session.rs"]
 mod engine_session;
-pub(crate) use engine_session::PreparedFlutterRenderer;
+pub(crate) use engine_session::{FlutterLaunch, PreparedFlutterRenderer};
 #[path = "flutter_runtime/event_pipeline.rs"]
 mod event_pipeline;
 #[path = "flutter_runtime/input.rs"]
@@ -103,8 +104,8 @@ pub use input::InputQueue;
 use input::{InputRecord, KeyboardRecord, flutter_physical_scroll_delta, glfw_keycode};
 pub use output_pipeline::ReadyOutputFrame;
 use output_pipeline::{
-    OutputBufferBroker, OutputPoolDescriptor, PendingVsyncBatons, RenderTargetBlocked,
-    VsyncRegistration,
+    FrameCompletion, OutputBufferBroker, OutputPoolDescriptor, PendingVsyncBatons,
+    RenderTargetBlocked, VsyncRegistration,
 };
 use render_audit::{RenderAuditStage, RenderDamageAudit};
 pub use renderer::SampledBufferHoldBatch;
@@ -578,7 +579,7 @@ pub struct FlutterRuntime {
     outputs_visible: Option<bool>,
     lock_frame_gate: lock_frame::LockFrameGate,
     fingerprint_scene: fingerprint_scene::FingerprintScene,
-    published_text_input_state: Option<(bool, bool, bool, u32, u32, u64)>,
+    published_text_input_state: Option<crate::wayland_frontend::SoftwareKeyboardState>,
     frame_ready_observed: bool,
     first_frame_received: bool,
     last_pointer_timestamp_micros: usize,

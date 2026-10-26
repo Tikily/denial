@@ -204,12 +204,15 @@ mod scene_input;
 mod screencopy;
 #[path = "wayland_frontend/startup.rs"]
 mod startup;
+pub(crate) use startup::FrontendConfig;
 #[path = "wayland_frontend/surface_pipeline.rs"]
 mod surface_pipeline;
 #[cfg(feature = "flutter")]
 pub(crate) use screencopy::{
     OutputCompositeSource, compose_output_targets_to_atlas, copy_atlas_region_to_memory,
 };
+#[cfg(feature = "flutter")]
+use surface_pipeline::SurfaceTreeRoot;
 #[cfg(feature = "flutter")]
 pub(crate) use surface_pipeline::canvas_rect_to_buffer;
 #[cfg(feature = "flutter")]
@@ -271,6 +274,7 @@ use managed_window::toplevel_has_state;
 use output_power::OutputPowerManager;
 #[cfg(feature = "flutter")]
 use surface_snapshot::{rgba_payload_len, shm_cache_budget_for_atlas, snapshot_shm_buffer};
+pub(crate) use text_input::SoftwareKeyboardState;
 use text_input::{SeatFocusKind, TextInputManager};
 pub(super) use topology::saturating_point_add;
 use topology::{

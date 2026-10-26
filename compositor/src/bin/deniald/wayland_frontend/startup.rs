@@ -2,8 +2,16 @@
 
 use super::*;
 
+/// The session configuration a frontend starts with.
+pub(crate) struct FrontendConfig {
+    pub(crate) xwayland_enabled: bool,
+    pub(crate) work_area: crate::options::WorkAreaOptions,
+    pub(crate) scrolling_layout_axes: BTreeMap<String, ScrollingLayoutAxis>,
+    pub(crate) settings: SettingsManager,
+    pub(crate) shortcuts: ShortcutManager,
+}
+
 impl WaylandFrontend {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         event_loop: &mut EventLoop<'static, RuntimeState>,
         snapshot: &TopologySnapshot,
@@ -11,12 +19,15 @@ impl WaylandFrontend {
         seat_name: &str,
         display_device: DrmDeviceFd,
         render_device: DrmDeviceFd,
-        xwayland_enabled: bool,
-        work_area: crate::options::WorkAreaOptions,
-        scrolling_layout_axes: BTreeMap<String, ScrollingLayoutAxis>,
-        settings: SettingsManager,
-        shortcuts: ShortcutManager,
+        config: FrontendConfig,
     ) -> Result<Self, Box<dyn Error>> {
+        let FrontendConfig {
+            xwayland_enabled,
+            work_area,
+            scrolling_layout_axes,
+            settings,
+            shortcuts,
+        } = config;
         let display = Display::<RuntimeState>::new()?;
         let display_handle = display.handle();
         let loop_handle = event_loop.handle();

@@ -439,9 +439,11 @@ impl Session<'_, '_> {
             self.swapchain,
             self.topology,
             &mut self.output_configuration,
-            outputs,
-            configuration,
-            transition,
+            ResidentGeometry {
+                outputs,
+                configuration,
+                transition,
+            },
             &mut self.events,
             self.flutter,
         );

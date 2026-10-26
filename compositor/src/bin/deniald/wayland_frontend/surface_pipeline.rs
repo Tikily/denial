@@ -420,6 +420,17 @@ mod surface_crop_tests {
     }
 }
 
+/// The top of a surface tree: a window's own surface, or a popup above it.
+#[cfg(feature = "flutter")]
+#[derive(Clone, Copy)]
+pub(super) enum SurfaceTreeRoot {
+    Window,
+    Popup {
+        parent_surface_id: u64,
+        popup_surface_id: u64,
+    },
+}
+
 impl WaylandFrontend {
     #[cfg(feature = "flutter")]
     pub(super) fn surface_id(&self, surface: &WlSurface) -> Option<u64> {
@@ -803,20 +814,29 @@ impl WaylandFrontend {
         self.pending_dmabuf_imports.push((dmabuf, notifier));
     }
 
+    /// Appends `root` and its subsurfaces. A layer's composition order is its
+    /// index in `layers`, which starts empty for each window or cursor.
     #[cfg(feature = "flutter")]
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn append_surface_tree(
         &self,
         root: &WlSurface,
         origin: Point<i32, Logical>,
-        root_role: SurfaceRoleDescription,
-        root_parent_surface_id: u64,
-        popup_root_surface_id: u64,
+        tree: SurfaceTreeRoot,
         expects_sample: bool,
-        composition_order: &mut u32,
         layers: &mut Vec<SurfaceLayerDescription>,
         textures: &mut Vec<ExternalTextureFrame>,
     ) {
+        let (root_role, root_parent_surface_id, popup_root_surface_id) = match tree {
+            SurfaceTreeRoot::Window => (SurfaceRoleDescription::Root, 0, 0),
+            SurfaceTreeRoot::Popup {
+                parent_surface_id,
+                popup_surface_id,
+            } => (
+                SurfaceRoleDescription::Popup,
+                parent_surface_id,
+                popup_surface_id,
+            ),
+        };
         with_surface_tree_upward(
             root,
             SurfaceTreeContext {
@@ -986,12 +1006,11 @@ impl WaylandFrontend {
                     texture_source_height: source.size.h,
                     transform: transform_to_wire(transform),
                     scale_120: u32::try_from(scale).unwrap_or(1).saturating_mul(120),
-                    composition_order: *composition_order,
+                    composition_order: u32::try_from(layers.len()).unwrap_or(u32::MAX),
                     opacity,
                     opaque,
                     window_geometry,
                 });
-                *composition_order = composition_order.saturating_add(1);
             },
             |_, _, _| true,
         );
@@ -1314,7 +1333,6 @@ impl WaylandFrontend {
             app_id.clear();
             layers.clear();
             managed_window.write_metadata(&mut title, &mut app_id);
-            let mut composition_order = 0;
             // Flutter does not sample a texture after its window leaves the
             // visible scene (for example, once a minimize animation reaches
             // zero opacity). Mailbox those buffers without waiting for a
@@ -1325,11 +1343,8 @@ impl WaylandFrontend {
             self.append_surface_tree(
                 &surface,
                 (0, 0).into(),
-                SurfaceRoleDescription::Root,
-                0,
-                0,
+                SurfaceTreeRoot::Window,
                 expects_sample,
-                &mut composition_order,
                 &mut layers,
                 &mut textures,
             );
@@ -1355,11 +1370,11 @@ impl WaylandFrontend {
                 self.append_surface_tree(
                     popup_surface,
                     popup_origin,
-                    SurfaceRoleDescription::Popup,
-                    parent_surface_id,
-                    popup_surface_id,
+                    SurfaceTreeRoot::Popup {
+                        parent_surface_id: parent_surface_id,
+                        popup_surface_id: popup_surface_id,
+                    },
                     expects_sample,
-                    &mut composition_order,
                     &mut layers,
                     &mut textures,
                 );
@@ -1687,16 +1702,11 @@ impl WaylandFrontend {
                 app_id.clear();
                 app_id.push_str(layer.namespace());
                 layers.clear();
-
-                let mut composition_order = 0;
                 self.append_surface_tree(
                     surface,
                     (0, 0).into(),
-                    SurfaceRoleDescription::Root,
-                    0,
-                    0,
+                    SurfaceTreeRoot::Window,
                     true,
-                    &mut composition_order,
                     &mut layers,
                     &mut textures,
                 );
@@ -1717,11 +1727,11 @@ impl WaylandFrontend {
                     self.append_surface_tree(
                         popup_surface,
                         saturating_point_sub(popup_location, popup.geometry().loc),
-                        SurfaceRoleDescription::Popup,
-                        parent_surface_id,
-                        popup_surface_id,
+                        SurfaceTreeRoot::Popup {
+                            parent_surface_id: parent_surface_id,
+                            popup_surface_id: popup_surface_id,
+                        },
                         true,
-                        &mut composition_order,
                         &mut layers,
                         &mut textures,
                     );
@@ -1864,15 +1874,11 @@ impl WaylandFrontend {
                 app_id.push_str("denia-systemui-input-method");
                 layers.clear();
                 let expects_sample = self.window_expects_sample(stable_id);
-                let mut composition_order = 0;
                 self.append_surface_tree(
                     surface,
                     (0, 0).into(),
-                    SurfaceRoleDescription::Root,
-                    0,
-                    0,
+                    SurfaceTreeRoot::Window,
                     expects_sample,
-                    &mut composition_order,
                     &mut layers,
                     &mut textures,
                 );

@@ -601,6 +601,16 @@ impl From<serde_json::Error> for SettingsError {
     }
 }
 
+/// The document sections deniald applies itself, parsed into their types.
+#[derive(Clone)]
+struct TypedSettings {
+    keyboard: KeyboardSettings,
+    mouse: MouseSettings,
+    touchpad: TouchpadSettings,
+    color_scheme_preference: DesktopColorSchemePreference,
+    allow_client_cursor_surfaces: bool,
+}
+
 pub(super) struct SettingsManager {
     application_theming: Option<super::application_theming::ApplicationTheming>,
     pub(super) rotation_lock_supported: bool,
@@ -608,11 +618,7 @@ pub(super) struct SettingsManager {
     path: PathBuf,
     document: Map<String, Value>,
     revision: u64,
-    keyboard: KeyboardSettings,
-    mouse: MouseSettings,
-    touchpad: TouchpadSettings,
-    color_scheme_preference: DesktopColorSchemePreference,
-    allow_client_cursor_surfaces: bool,
+    typed: TypedSettings,
     /// Exact bytes last observed or committed by deniald. This catches an
     /// editor changing the file while the session is live, even if it forgets
     /// to update the human-visible revision field.
@@ -639,11 +645,7 @@ impl SettingsManager {
                         path,
                         document: parsed.document,
                         revision: parsed.revision,
-                        keyboard: parsed.keyboard,
-                        mouse: parsed.mouse,
-                        touchpad: parsed.touchpad,
-                        color_scheme_preference: parsed.color_scheme_preference,
-                        allow_client_cursor_surfaces: parsed.allow_client_cursor_surfaces,
+                        typed: parsed.typed,
                         persisted_bytes: existing,
                     };
                     if parsed.migrated
@@ -659,15 +661,7 @@ impl SettingsManager {
             }
         }
 
-        let (
-            document,
-            revision,
-            keyboard,
-            mouse,
-            touchpad,
-            color_scheme_preference,
-            allow_client_cursor_surfaces,
-        ) = default_document();
+        let (document, revision, typed) = default_document();
         let mut manager = Self {
             application_theming: None,
             rotation_lock_supported: false,
@@ -675,11 +669,7 @@ impl SettingsManager {
             path,
             document,
             revision,
-            keyboard,
-            mouse,
-            touchpad,
-            color_scheme_preference,
-            allow_client_cursor_surfaces,
+            typed,
             persisted_bytes: existing,
         };
         if manager.persisted_bytes.is_none()
@@ -699,23 +689,23 @@ impl SettingsManager {
     }
 
     pub(super) fn keyboard(&self) -> &KeyboardSettings {
-        &self.keyboard
+        &self.typed.keyboard
     }
 
     pub(super) fn mouse(&self) -> &MouseSettings {
-        &self.mouse
+        &self.typed.mouse
     }
 
     pub(super) fn touchpad(&self) -> &TouchpadSettings {
-        &self.touchpad
+        &self.typed.touchpad
     }
 
     pub(super) fn theme_snapshot(&self) -> DesktopThemeSnapshot {
-        DesktopThemeSnapshot::new(self.revision, self.color_scheme_preference)
+        DesktopThemeSnapshot::new(self.revision, self.typed.color_scheme_preference)
     }
 
     pub(super) fn allow_client_cursor_surfaces(&self) -> bool {
-        self.allow_client_cursor_surfaces
+        self.typed.allow_client_cursor_surfaces
     }
 
     pub(super) fn cursor_size(&self) -> u32 {
@@ -777,7 +767,7 @@ impl SettingsManager {
             "keyboard".to_owned(),
             serde_json::to_value(&keyboard).expect("default keyboard settings serialize"),
         );
-        self.keyboard = keyboard;
+        self.typed.keyboard = keyboard;
     }
 
     pub(super) fn prepare_shell_update(
@@ -828,15 +818,17 @@ impl SettingsManager {
         incoming.insert("revision".to_owned(), Value::from(self.next_revision()?));
         incoming.insert(
             "keyboard".to_owned(),
-            serde_json::to_value(&self.keyboard).expect("validated keyboard settings serialize"),
+            serde_json::to_value(&self.typed.keyboard)
+                .expect("validated keyboard settings serialize"),
         );
         incoming.insert(
             "mouse".to_owned(),
-            serde_json::to_value(&self.mouse).expect("validated mouse settings serialize"),
+            serde_json::to_value(&self.typed.mouse).expect("validated mouse settings serialize"),
         );
         incoming.insert(
             "touchpad".to_owned(),
-            serde_json::to_value(&self.touchpad).expect("validated touchpad settings serialize"),
+            serde_json::to_value(&self.typed.touchpad)
+                .expect("validated touchpad settings serialize"),
         );
         let color_scheme_preference = parse_color_scheme_preference(&incoming)?;
         let allow_client_cursor_surfaces = parse_allow_client_cursor_surfaces(&incoming)?;
@@ -848,11 +840,11 @@ impl SettingsManager {
         parse_workspace_settings(&incoming)?;
         self.prepare(
             incoming,
-            self.keyboard.clone(),
-            self.mouse.clone(),
-            self.touchpad.clone(),
-            color_scheme_preference,
-            allow_client_cursor_surfaces,
+            TypedSettings {
+                color_scheme_preference,
+                allow_client_cursor_surfaces,
+                ..self.typed.clone()
+            },
         )
     }
 
@@ -893,11 +885,10 @@ impl SettingsManager {
         );
         self.prepare(
             document,
-            keyboard,
-            self.mouse.clone(),
-            self.touchpad.clone(),
-            self.color_scheme_preference,
-            self.allow_client_cursor_surfaces,
+            TypedSettings {
+                keyboard,
+                ..self.typed.clone()
+            },
         )
     }
 
@@ -916,11 +907,10 @@ impl SettingsManager {
         );
         self.prepare(
             document,
-            self.keyboard.clone(),
-            self.mouse.clone(),
-            touchpad,
-            self.color_scheme_preference,
-            self.allow_client_cursor_surfaces,
+            TypedSettings {
+                touchpad,
+                ..self.typed.clone()
+            },
         )
     }
 
@@ -939,11 +929,10 @@ impl SettingsManager {
         );
         self.prepare(
             document,
-            self.keyboard.clone(),
-            mouse,
-            self.touchpad.clone(),
-            self.color_scheme_preference,
-            self.allow_client_cursor_surfaces,
+            TypedSettings {
+                mouse,
+                ..self.typed.clone()
+            },
         )
     }
 
@@ -962,43 +951,14 @@ impl SettingsManager {
             return Ok(None);
         }
 
-        let (
-            mut document,
-            keyboard,
-            mouse,
-            touchpad,
-            color_scheme_preference,
-            allow_client_cursor_surfaces,
-        ) = match observed.as_deref() {
+        let (mut document, typed) = match observed.as_deref() {
             Some(bytes) => {
                 let parsed = parse_document(bytes)?;
-                (
-                    parsed.document,
-                    parsed.keyboard,
-                    parsed.mouse,
-                    parsed.touchpad,
-                    parsed.color_scheme_preference,
-                    parsed.allow_client_cursor_surfaces,
-                )
+                (parsed.document, parsed.typed)
             }
             None => {
-                let (
-                    document,
-                    _,
-                    keyboard,
-                    mouse,
-                    touchpad,
-                    color_scheme_preference,
-                    allow_client_cursor_surfaces,
-                ) = default_document();
-                (
-                    document,
-                    keyboard,
-                    mouse,
-                    touchpad,
-                    color_scheme_preference,
-                    allow_client_cursor_surfaces,
-                )
+                let (document, _, typed) = default_document();
+                (document, typed)
             }
         };
         // Live editor changes have the same freeze-current semantics as a
@@ -1007,19 +967,10 @@ impl SettingsManager {
         self.capture_rotation_lock(&mut document)?;
         // Grammar validation is not enough for an external keymap edit. Do
         // the installed-XKB preflight before any live input state is changed.
-        keyboard.compiled_layout_names()?;
+        typed.keyboard.compiled_layout_names()?;
         document.insert("version".to_owned(), Value::from(SETTINGS_SCHEMA_VERSION));
         document.insert("revision".to_owned(), Value::from(self.next_revision()?));
-        self.prepare_against(
-            document,
-            keyboard,
-            mouse,
-            touchpad,
-            color_scheme_preference,
-            allow_client_cursor_surfaces,
-            observed,
-        )
-        .map(Some)
+        self.prepare_against(document, typed, observed).map(Some)
     }
 
     pub(super) fn commit(
@@ -1038,11 +989,7 @@ impl SettingsManager {
         prepared.committed = true;
         self.document = std::mem::take(&mut prepared.document);
         self.revision = prepared.revision;
-        self.keyboard = std::mem::take(&mut prepared.keyboard);
-        self.mouse = std::mem::take(&mut prepared.mouse);
-        self.touchpad = std::mem::take(&mut prepared.touchpad);
-        self.color_scheme_preference = prepared.color_scheme_preference;
-        self.allow_client_cursor_surfaces = prepared.allow_client_cursor_surfaces;
+        std::mem::swap(&mut self.typed, &mut prepared.typed);
         self.persisted_bytes = Some(std::mem::take(&mut prepared.bytes));
         // Rename is the transaction's point of no return. Keep memory and the
         // live keyboard aligned with the renamed file even on filesystems
@@ -1076,31 +1023,15 @@ impl SettingsManager {
     fn prepare(
         &self,
         document: Map<String, Value>,
-        keyboard: KeyboardSettings,
-        mouse: MouseSettings,
-        touchpad: TouchpadSettings,
-        color_scheme_preference: DesktopColorSchemePreference,
-        allow_client_cursor_surfaces: bool,
+        typed: TypedSettings,
     ) -> Result<PreparedSettingsUpdate, SettingsError> {
-        self.prepare_against(
-            document,
-            keyboard,
-            mouse,
-            touchpad,
-            color_scheme_preference,
-            allow_client_cursor_surfaces,
-            self.persisted_bytes.clone(),
-        )
+        self.prepare_against(document, typed, self.persisted_bytes.clone())
     }
 
     fn prepare_against(
         &self,
         mut document: Map<String, Value>,
-        keyboard: KeyboardSettings,
-        mouse: MouseSettings,
-        touchpad: TouchpadSettings,
-        color_scheme_preference: DesktopColorSchemePreference,
-        allow_client_cursor_surfaces: bool,
+        typed: TypedSettings,
         expected_disk_bytes: Option<Vec<u8>>,
     ) -> Result<PreparedSettingsUpdate, SettingsError> {
         let application_environment = ApplicationEnvironment::from_document(&document)?;
@@ -1116,11 +1047,7 @@ impl SettingsManager {
             temporary,
             document,
             revision,
-            keyboard,
-            mouse,
-            touchpad,
-            color_scheme_preference,
-            allow_client_cursor_surfaces,
+            typed,
             bytes,
             expected_disk_bytes,
             committed: false,
@@ -1148,11 +1075,7 @@ pub(super) struct PreparedSettingsUpdate {
     temporary: PathBuf,
     document: Map<String, Value>,
     revision: u64,
-    keyboard: KeyboardSettings,
-    mouse: MouseSettings,
-    touchpad: TouchpadSettings,
-    color_scheme_preference: DesktopColorSchemePreference,
-    allow_client_cursor_surfaces: bool,
+    typed: TypedSettings,
     bytes: Vec<u8>,
     expected_disk_bytes: Option<Vec<u8>>,
     committed: bool,
@@ -1160,15 +1083,15 @@ pub(super) struct PreparedSettingsUpdate {
 
 impl PreparedSettingsUpdate {
     pub(super) fn keyboard(&self) -> &KeyboardSettings {
-        &self.keyboard
+        &self.typed.keyboard
     }
 
     pub(super) fn mouse(&self) -> &MouseSettings {
-        &self.mouse
+        &self.typed.mouse
     }
 
     pub(super) fn touchpad(&self) -> &TouchpadSettings {
-        &self.touchpad
+        &self.typed.touchpad
     }
 }
 
@@ -1183,11 +1106,7 @@ impl Drop for PreparedSettingsUpdate {
 struct ParsedSettingsDocument {
     document: Map<String, Value>,
     revision: u64,
-    keyboard: KeyboardSettings,
-    mouse: MouseSettings,
-    touchpad: TouchpadSettings,
-    color_scheme_preference: DesktopColorSchemePreference,
-    allow_client_cursor_surfaces: bool,
+    typed: TypedSettings,
     application_environment: ApplicationEnvironment,
     migrated: bool,
 }
@@ -1473,25 +1392,19 @@ fn parse_document(bytes: &[u8]) -> Result<ParsedSettingsDocument, SettingsError>
     Ok(ParsedSettingsDocument {
         document,
         revision,
-        keyboard,
-        mouse,
-        touchpad,
-        color_scheme_preference,
-        allow_client_cursor_surfaces,
+        typed: TypedSettings {
+            keyboard,
+            mouse,
+            touchpad,
+            color_scheme_preference,
+            allow_client_cursor_surfaces,
+        },
         application_environment,
         migrated,
     })
 }
 
-fn default_document() -> (
-    Map<String, Value>,
-    u64,
-    KeyboardSettings,
-    MouseSettings,
-    TouchpadSettings,
-    DesktopColorSchemePreference,
-    bool,
-) {
+fn default_document() -> (Map<String, Value>, u64, TypedSettings) {
     let revision = 1;
     let keyboard = KeyboardSettings::default();
     let mouse = MouseSettings::default();
@@ -1533,15 +1446,14 @@ fn default_document() -> (
         .and_then(Value::as_object_mut)
         .expect("default layout is an object")
         .insert("systemBarSide".to_owned(), Value::String("top".to_owned()));
-    (
-        document,
-        revision,
+    let typed = TypedSettings {
         keyboard,
         mouse,
         touchpad,
         color_scheme_preference,
         allow_client_cursor_surfaces,
-    )
+    };
+    (document, revision, typed)
 }
 
 fn parse_color_scheme_preference(

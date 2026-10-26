@@ -115,6 +115,14 @@ pub struct ReadyOutputFrame {
     pub(crate) feedback: Vec<crate::surface_feedback::SurfaceFeedback>,
 }
 
+/// What a slot keeps once its frame is rendered: the fence that signals
+/// completion, when rendering finished, and the client feedback it carries.
+pub(super) struct FrameCompletion {
+    pub(super) fence: Option<OwnedFd>,
+    pub(super) rendered_at: Option<Instant>,
+    pub(super) feedback: Vec<crate::surface_feedback::SurfaceFeedback>,
+}
+
 impl OutputBufferBroker {
     pub(super) fn new<'a>(
         descriptors: impl IntoIterator<Item = OutputPoolDescriptor<'a>>,
@@ -386,9 +394,7 @@ impl OutputBufferBroker {
         framebuffer: u32,
         frame_damage: &[sys::FlutterRect],
         buffer_damage: &[sys::FlutterRect],
-        fence: Option<OwnedFd>,
-        rendered_at: Option<Instant>,
-        feedback: Vec<crate::surface_feedback::SurfaceFeedback>,
+        completion: FrameCompletion,
     ) -> bool {
         let Some(pool) = self
             .pools
@@ -431,9 +437,9 @@ impl OutputBufferBroker {
         slot.damage.clear();
         slot.ready_damage = Some(buffer_damage_region);
         slot.state = BufferState::Ready;
-        slot.fence = fence;
-        slot.rendered_at = rendered_at;
-        slot.feedback = feedback;
+        slot.fence = completion.fence;
+        slot.rendered_at = completion.rendered_at;
+        slot.feedback = completion.feedback;
         slot.ready_transaction = self.transaction;
         true
     }
@@ -674,9 +680,11 @@ mod capture_tests {
             framebuffer,
             &full,
             &full,
-            Some(final_fence),
-            None,
-            Vec::new()
+            FrameCompletion {
+                fence: Some(final_fence),
+                rendered_at: None,
+                feedback: Vec::new(),
+            },
         ));
         let mut ready = broker.finish_transfer(framebuffer);
         assert_eq!(ready.len(), 1);
@@ -820,9 +828,11 @@ mod capture_tests {
                 framebuffer,
                 scene_damage,
                 &full,
-                None,
-                None,
-                Vec::new(),
+                FrameCompletion {
+                    fence: None,
+                    rendered_at: None,
+                    feedback: Vec::new(),
+                },
             ));
             let ready = broker.finish_transaction().pop().unwrap();
             broker.publish(&ready).unwrap();

@@ -829,9 +829,13 @@ impl OpenGlHandler for FlutterGlHandler {
                     match completion {
                         Ok(final_fence) => {
                             let mut broker = lock(&handler.broker);
+                            let completion = FrameCompletion {
+                                fence: Some(final_fence),
+                                rendered_at,
+                                feedback: sampled_feedback,
+                            };
                             if !broker.mark_ready_with_feedback(view_id, framebuffer,
-                                &frame_damage, &buffer_damage, Some(final_fence), rendered_at,
-                                sampled_feedback) {
+                                &frame_damage, &buffer_damage, completion) {
                                 drop(broker);
                                 let _ = handler.events.send(RuntimeEvent::FatalRender {
                                     generation: handler.generation,
@@ -870,9 +874,11 @@ impl OpenGlHandler for FlutterGlHandler {
                 framebuffer,
                 frame.frame_damage,
                 frame.buffer_damage,
-                fence,
-                rendered_at,
-                sampled_feedback,
+                FrameCompletion {
+                    fence,
+                    rendered_at,
+                    feedback: sampled_feedback,
+                },
             ) {
                 error!(
                     view_id,

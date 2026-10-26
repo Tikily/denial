@@ -24,6 +24,7 @@ use super::options::{
     WorkAreaOptions,
 };
 use super::settings::{KeyboardLayout, KeyboardSettings, MouseSettings, TouchpadSettings};
+use super::wayland_frontend::SoftwareKeyboardState;
 use super::xembed_tray_protocol::{
     XEmbedTrayAction, XEmbedTrayCommand, XEmbedTrayEvent, XEmbedTrayEventKind,
 };
@@ -221,6 +222,15 @@ pub enum KeyboardCommand {
         replaced: String,
         text: String,
     },
+}
+
+/// Pointer settings the shell edits, and whether a device of each kind exists.
+#[derive(Clone, Copy, Debug)]
+pub struct InputDeviceSettings<'a> {
+    pub has_touchpad: bool,
+    pub touchpad: &'a TouchpadSettings,
+    pub has_mouse: bool,
+    pub mouse: &'a MouseSettings,
 }
 
 /// The word the software keyboard is typing, for suggestions.
