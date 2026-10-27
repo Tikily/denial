@@ -739,10 +739,11 @@ class _LockDepthForegroundState extends ConsumerState<_LockDepthForeground> {
         if (source == null || size.isEmpty) {
           return const SizedBox.shrink();
         }
-        final cover = math.max(
-          size.width / source.width,
-          size.height / source.height,
-        );
+        // Covered, then zoomed about the alignment's point, as the
+        // wallpaper is drawn.
+        final cover =
+            math.max(size.width / source.width, size.height / source.height) *
+            assignment.zoom;
         final sigma = settings.blurRadius / cover;
         if (sigma > 0.0 && _maskKey != (sigma, size)) {
           _bake(source, sigma, size);

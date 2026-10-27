@@ -208,6 +208,7 @@ class ShellOutputWallpaper extends ConsumerWidget {
                 assignment.alignmentForOutput(output.name).x,
                 assignment.alignmentForOutput(output.name).y,
               ),
+              zoom: assignment.zoom,
             ),
             if (darkness > 0)
               _WallpaperDarknessLayer(
@@ -251,6 +252,7 @@ class WallpaperScene extends StatelessWidget {
                 assignment.spanAlignment.x,
                 assignment.spanAlignment.y,
               ),
+              zoom: assignment.zoom,
             ),
           ),
         for (final output in outputs)
@@ -264,6 +266,7 @@ class WallpaperScene extends StatelessWidget {
                 assignment.alignmentForOutput(output.name).x,
                 assignment.alignmentForOutput(output.name).y,
               ),
+              zoom: assignment.zoom,
             ),
           ),
         if (outputs.isEmpty && assignment.allDarkness > 0.0)
@@ -309,11 +312,19 @@ class _WallpaperImage extends StatefulWidget {
     required this.resource,
     required this.targetPixelSize,
     this.alignment = Alignment.center,
+    this.zoom = 1.0,
   });
 
   final WallpaperResource resource;
   final Size targetPixelSize;
   final Alignment alignment;
+
+  /// Enlarges the covering image about [alignment]'s point.
+  final double zoom;
+
+  /// The size to decode at: zoomed in steps of a half, so a zoom being
+  /// changed decodes the picture again only now and then.
+  Size get _decodeSize => targetPixelSize * ((zoom * 2).ceil() / 2);
 
   @override
   State<_WallpaperImage> createState() => _WallpaperImageState();
@@ -328,7 +339,7 @@ class _WallpaperImageState extends State<_WallpaperImage> {
     super.didChangeDependencies();
     final provider = wallpaperImageProvider(
       widget.resource,
-      targetPixelSize: widget.targetPixelSize,
+      targetPixelSize: widget._decodeSize,
     );
     final configuration = createLocalImageConfiguration(context);
     final currentLease = _cacheLease;
@@ -346,7 +357,7 @@ class _WallpaperImageState extends State<_WallpaperImage> {
     super.didUpdateWidget(oldWidget);
     final provider = wallpaperImageProvider(
       widget.resource,
-      targetPixelSize: widget.targetPixelSize,
+      targetPixelSize: widget._decodeSize,
     );
     if (provider == _provider) {
       return;
@@ -367,6 +378,20 @@ class _WallpaperImageState extends State<_WallpaperImage> {
 
   @override
   Widget build(BuildContext context) {
+    final image = _image();
+    if (widget.zoom == 1.0) {
+      return image;
+    }
+    return ClipRect(
+      child: Transform.scale(
+        scale: widget.zoom,
+        alignment: widget.alignment,
+        child: image,
+      ),
+    );
+  }
+
+  Widget _image() {
     return Image(
       image: _provider,
       fit: BoxFit.cover,

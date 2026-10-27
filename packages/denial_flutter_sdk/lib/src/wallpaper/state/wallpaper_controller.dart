@@ -807,6 +807,7 @@ class WallpaperStore {
       return WallpaperAssignment(
         all: all,
         spanAlignment: alignment,
+        zoom: _zoom(decoded['zoom']) ?? 1.0,
         allDarkness: allDarkness,
         outputOverrides: overrides,
         outputAlignmentOverrides: alignmentOverrides,
@@ -858,6 +859,7 @@ class WallpaperStore {
         'verticalAlignment': assignment.spanAlignment.vertical.name,
         'alignmentX': assignment.spanAlignment.x,
         'alignmentY': assignment.spanAlignment.y,
+        'zoom': assignment.zoom,
         'darkness': assignment.allDarkness,
         'outputs': <String, String>{
           for (final entry in assignment.outputOverrides.entries)
@@ -913,6 +915,17 @@ class WallpaperStore {
       return null;
     }
     return darkness.clamp(0.0, 1.0).toDouble();
+  }
+
+  double? _zoom(Object? value) {
+    if (value is! num) {
+      return null;
+    }
+    final zoom = value.toDouble();
+    if (!zoom.isFinite) {
+      return null;
+    }
+    return zoom.clamp(1.0, WallpaperAssignment.maxZoom).toDouble();
   }
 
   double? _alignmentPosition(Object? value) {
