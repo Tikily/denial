@@ -20,7 +20,8 @@ import 'wallpaper_controller.dart';
 /// cut.
 ///
 /// The state counts the masks written, so the lock screen knows when to read
-/// the cache again.
+/// the cache again. It counts every new sidecar in the cache, whoever ran the
+/// program: the phone's Settings makes the mask of a wallpaper it sets.
 final wallpaperDepthProvider = NotifierProvider<WallpaperDepth, int>(
   WallpaperDepth.new,
 );
@@ -35,7 +36,36 @@ class WallpaperDepth extends Notifier<int> {
   String? _next;
 
   @override
-  int build() => 0;
+  int build() {
+    unawaited(_follow());
+    return 0;
+  }
+
+  /// Counts each `lock-mask.json` the program renames into the cache: it
+  /// writes the sidecar last, so the mask beside it is complete.
+  Future<void> _follow() async {
+    final paths = ref.read(runtimePathsProvider);
+    if (_program(paths) == null) return;
+    try {
+      final directory = Directory(wallpaperDepthDirectory(paths)).absolute;
+      await directory.create(recursive: true);
+      if (!ref.mounted) return;
+      final sidecar = p.join(directory.path, 'lock-mask.json');
+      final subscription = directory
+          .watch(events: FileSystemEvent.create | FileSystemEvent.move)
+          .where(
+            (event) =>
+                event.path == sidecar ||
+                (event is FileSystemMoveEvent && event.destination == sidecar),
+          )
+          .listen((_) {
+            if (ref.mounted) state++;
+          });
+      ref.onDispose(subscription.cancel);
+    } on FileSystemException catch (error) {
+      debugPrint('wallpaper-depth: cannot follow the cache: $error');
+    }
+  }
 
   /// Makes the mask for the wallpaper the lock screen shows, once the picker
   /// has closed.
@@ -78,8 +108,6 @@ class WallpaperDepth extends Notifier<int> {
       if (code != 0) {
         final lines = (await errors).trim().split('\n');
         debugPrint('wallpaper-depth: $wallpaper failed ($code): ${lines.last}');
-      } else if (ref.mounted) {
-        state++;
       }
     } on Object catch (error) {
       debugPrint('wallpaper-depth: $error');
