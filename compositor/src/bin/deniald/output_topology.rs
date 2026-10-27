@@ -46,7 +46,7 @@ pub(super) struct RuntimeOutputConfiguration {
     pub(super) scales_120: BTreeMap<String, u32>,
     pub(super) transforms: BTreeMap<String, OutputTransform>,
     pub(super) scrolling_layout_axes: BTreeMap<String, ScrollingLayoutAxis>,
-    /// Transient device rotation from iio-sensor-proxy. `transforms` remains
+    /// Transient device rotation from steinerd. `transforms` remains
     /// the persistent panel-mount baseline.
     pub(super) sensor_rotation: OutputTransform,
     pub(super) vrr_outputs: BTreeSet<String>,

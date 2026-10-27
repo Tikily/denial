@@ -1,4 +1,4 @@
-//! Low-frequency device-orientation input from iio-sensor-proxy.
+//! Low-frequency device-orientation input from steinerd.
 //!
 //! D-Bus is deliberately isolated on a helper thread. The compositor receives
 //! only already-classified cardinal changes through calloop, so sensor service
@@ -13,9 +13,10 @@ use smithay::reexports::calloop::channel::{Channel, Sender, channel};
 use tracing::{debug, info, warn};
 use zbus::blocking::Proxy;
 
-const SENSOR_SERVICE: &str = "net.hadess.SensorProxy";
-const SENSOR_PATH: &str = "/net/hadess/SensorProxy";
-const SENSOR_INTERFACE: &str = "net.hadess.SensorProxy";
+const SENSOR_SERVICE: &str = "org.steinerd";
+const SENSOR_PATH: &str = "/org/steinerd";
+const SENSOR_INTERFACE: &str = "org.steinerd.Sensors1";
+const SENSOR: &str = "orientation";
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,7 +33,7 @@ impl Orientation {
         match self {
             Self::Undefined | Self::Normal => OutputTransform::Normal,
             Self::BottomUp => OutputTransform::Rotate180,
-            // iio-sensor-proxy names the physical edge which points upward.
+            // steinerd names the physical edge which points upward.
             // The desktop must turn in the opposite direction to remain
             // upright in panel coordinates.
             Self::LeftUp => OutputTransform::Rotate90,
@@ -127,7 +128,7 @@ enum Wake<C, O> {
 
 /// Follows the sensor for as long as one system bus connection lives. A
 /// missing or failed sensor service is never polled: the worker sleeps until
-/// iio-sensor-proxy gains a new owner, which also covers a later udev start.
+/// steinerd gains a new owner, which also covers a later start.
 fn monitor_bus(events: &Sender<Orientation>, published: &mut Option<Orientation>) -> MonitorResult {
     let connection = match crate::bus::blocking_system() {
         Ok(connection) => connection,
@@ -180,18 +181,18 @@ where
     let mut changes = future::block_on(
         proxy
             .inner()
-            .receive_property_changed::<String>("AccelerometerOrientation"),
+            .receive_property_changed::<String>("Orientation"),
     );
-    if let Err(error) = proxy.call::<_, _, ()>("ClaimAccelerometer", &()) {
+    if let Err(error) = proxy.call::<_, _, ()>("Claim", &(SENSOR,)) {
         return SensorResult::Failed(error.to_string());
     }
 
-    let has_accelerometer = proxy
-        .get_property::<bool>("HasAccelerometer")
+    let has_orientation = proxy
+        .get_property::<bool>("HasOrientation")
         .unwrap_or(false);
-    let initial = if has_accelerometer {
+    let initial = if has_orientation {
         proxy
-            .get_property::<String>("AccelerometerOrientation")
+            .get_property::<String>("Orientation")
             .map(|value| Orientation::parse(&value))
             .unwrap_or(Orientation::Undefined)
     } else {
@@ -199,7 +200,7 @@ where
     };
     if publish(events, published, initial).is_err() {
         drop(changes);
-        let _ = proxy.call::<_, _, ()>("ReleaseAccelerometer", &());
+        let _ = proxy.call::<_, _, ()>("Release", &(SENSOR,));
         return SensorResult::Closed;
     }
     if initial != Orientation::Undefined {
@@ -237,7 +238,7 @@ where
         }
     };
     drop(changes);
-    let _ = proxy.call::<_, _, ()>("ReleaseAccelerometer", &());
+    let _ = proxy.call::<_, _, ()>("Release", &(SENSOR,));
     result
 }
 

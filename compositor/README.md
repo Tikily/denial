@@ -191,15 +191,16 @@ validates mode and VRR changes with an atomic `TEST_ONLY` commit before
 changing live KMS state. Unlisted outputs use the deterministic left-to-right
 fallback.
 
-When `iio-sensor-proxy` exposes an accelerometer, Denial automatically rotates
-built-in `DSI-*`, `eDP-*`, and `LVDS-*` panels. The configured `transform=` is
-the panel's fixed mounting transform; sensor rotation is transient and is not
-written back to the output file. Sensor and manual transform-only changes keep
-the Flutter engine, native output buffers, and compressed/tiled modifiers
-resident. Automatic cardinal changes animate the retained composited scene for
-300 ms on the physical output clock. The old-size scene starts rotating first;
-Flutter receives the new logical canvas during the final quarter. Projection-
-only frames do not drive Dart or advance client textures.
+When steinerd (Phonewave `services/sensors/steinerd`) offers orientation,
+Denial automatically rotates built-in `DSI-*`, `eDP-*`, and `LVDS-*` panels.
+The configured `transform=` is the panel's fixed mounting transform; sensor
+rotation is transient and is not written back to the output file. Sensor and
+manual transform-only changes keep the Flutter engine, native output buffers,
+and compressed/tiled modifiers resident. Automatic cardinal changes animate the
+retained composited scene for 300 ms on the physical output clock. The old-size
+scene starts rotating first; Flutter receives the new logical canvas during the
+final quarter. Projection-only frames do not drive Dart or advance client
+textures.
 
 `disabled=` is a preference rather than a hard rule. When the preferences
 disable every connected output, Denial lights one anyway: a built-in panel
