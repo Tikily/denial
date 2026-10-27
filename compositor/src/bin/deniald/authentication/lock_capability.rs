@@ -1,6 +1,7 @@
-//! Advisory account metadata prevents automatic locks with no unlock method.
-//! Unknown providers preserve the configured security policy; explicit locks
-//! never depend on this probe. No password or fingerprint scan is attempted.
+//! Account metadata tells whether the account has a password or fingerprint.
+//! With neither and no PIN record, the lock screen opens with a swipe. Unknown
+//! providers keep the password prompt. No password or fingerprint scan is
+//! attempted.
 
 use super::*;
 use futures_lite::future;
@@ -16,12 +17,6 @@ pub(super) enum Capability {
     Unknown,
     Available,
     Unavailable,
-}
-
-impl Capability {
-    pub(super) fn permits_lock(self) -> bool {
-        matches!(self, Self::Unknown | Self::Available)
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -91,27 +86,27 @@ pub(super) fn run_worker(shared: &Arc<SharedAuthentication>) {
 
 fn publish(shared: &SharedAuthentication, capability: Capability) {
     let mut state = lock_unpoisoned(&shared.state);
-    // Losing the metadata provider must not re-arm an account previously
-    // established to have no unlock method.
-    let capability =
-        if capability == Capability::Unknown && state.automatic_lock == Capability::Unavailable {
-            Capability::Unavailable
-        } else {
-            capability
-        };
-    if state.automatic_lock == capability {
+    // Losing the metadata provider must not lock out an account previously
+    // established to have no credential.
+    let capability = if capability == Capability::Unknown
+        && state.account_credential == Capability::Unavailable
+    {
+        Capability::Unavailable
+    } else {
+        capability
+    };
+    if state.account_credential == capability {
         return;
     }
-    state.automatic_lock = capability;
-    state.automatic_lock_warning_shown = false;
+    state.account_credential = capability;
     match capability {
-        Capability::Unavailable => warn!(
-            "automatic session locking disabled: account has no usable password or fingerprint unlock; explicit locking remains available"
+        Capability::Unavailable => info!(
+            "account has no usable password or fingerprint; the lock screen opens with a swipe unless a PIN is set"
         ),
         Capability::Unknown => {
-            warn!("automatic lock capability is unknown; retaining configured locking policy")
+            warn!("account credentials are unknown; the lock screen asks for the password")
         }
-        _ => info!(?capability, "automatic session lock capability changed"),
+        _ => info!(?capability, "account credential changed"),
     }
 }
 
@@ -385,9 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_metadata_does_not_disable_configured_security() {
-        assert!(Capability::Unknown.permits_lock());
-        assert!(!Capability::Pending.permits_lock());
+    fn unknown_metadata_is_never_credential_free() {
         assert_eq!(classify(None, Some(false)), Capability::Unknown);
         assert_eq!(
             classify(

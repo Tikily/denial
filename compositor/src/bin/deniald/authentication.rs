@@ -857,7 +857,9 @@ struct AuthenticationState {
     credential_refresh: bool,
     available: bool,
     unavailable_reason: String,
-    automatic_lock: lock_capability::Capability,
+    /// Whether the account has a password or fingerprint; with neither and no
+    /// PIN record, a swipe unlocks.
+    account_credential: lock_capability::Capability,
     automatic_lock_warning_shown: bool,
 }
 
@@ -926,7 +928,7 @@ impl AuthenticationController {
                 fingerprint::run_worker(&shared, &mut fingerprint::FprintBackend);
             })?;
         *lock_unpoisoned(&controller.fingerprint_worker) = Some(worker);
-        lock_unpoisoned(&controller.shared.state).automatic_lock =
+        lock_unpoisoned(&controller.shared.state).account_credential =
             lock_capability::Capability::Pending;
         let shared = Arc::clone(&controller.shared);
         let worker = thread::Builder::new()
@@ -987,7 +989,7 @@ impl AuthenticationController {
                 credential_refresh: true,
                 available,
                 unavailable_reason,
-                automatic_lock: lock_capability::Capability::Unknown,
+                account_credential: lock_capability::Capability::Unknown,
                 automatic_lock_warning_shown: false,
             }),
             condition: Condvar::new(),
@@ -1120,17 +1122,16 @@ impl AuthenticationController {
         self.shared.notify();
     }
 
-    /// Explicit locks remain unconditional. Only compositor-owned automatic
-    /// locks use the account capability discovered by the background worker.
+    /// Explicit locks remain unconditional. An account without any credential
+    /// still locks; its lock screen opens with a swipe.
     pub(super) fn lock_automatically(&self) -> bool {
         let mut state = lock_unpoisoned(&self.shared.state);
         if self.locked() {
             return true;
         }
-        if !state.available || !state.automatic_lock.permits_lock() {
+        if !state.available {
             if !state.automatic_lock_warning_shown {
-                warn!(capability = ?state.automatic_lock,
-                    "skipped automatic session lock: no usable unlock method is known");
+                warn!("skipped automatic session lock: authentication is unavailable");
                 state.automatic_lock_warning_shown = true;
             }
             return false;
@@ -1419,6 +1420,9 @@ fn run_authentication_worker(
         let cancelled = move || authentication_cancelled(&cancellation_shared, work.generation);
         let result = match pin.as_ref().filter(|_| !work.password_only) {
             Some(pin) => pin::authenticate(pin, backend, &mut conversation, &cancelled),
+            None if !work.password_only && credential_free(shared, pin_store) => {
+                BackendResult::Success
+            }
             None => backend.authenticate(username, &mut conversation, &cancelled),
         };
 
@@ -1468,6 +1472,13 @@ fn run_authentication_worker(
             });
         }
     }
+}
+
+/// No password, fingerprint or PIN record: the lock screen opens with a
+/// swipe. An unreadable PIN record is not an absent one.
+fn credential_free(shared: &SharedAuthentication, store: Option<&pin::PinStore>) -> bool {
+    lock_unpoisoned(&shared.state).account_credential == lock_capability::Capability::Unavailable
+        && store.is_none_or(|store| matches!(store.load(), Ok(None)))
 }
 
 /// An unreadable record falls back to the password and never blocks unlock.

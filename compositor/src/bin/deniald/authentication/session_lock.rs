@@ -205,8 +205,8 @@ mod tests {
         assert!(received.recv_timeout(Duration::from_millis(600)).is_err());
         assert!(!controller.locked());
 
-        // Capability guards must not suppress an explicit logind request.
-        lock_unpoisoned(&controller.shared.state).automatic_lock =
+        // An account without credentials still honors an explicit logind request.
+        lock_unpoisoned(&controller.shared.state).account_credential =
             lock_capability::Capability::Unavailable;
         server
             .emit_signal(None::<&str>, PATH, SESSION_INTERFACE, "Lock", &())

@@ -239,37 +239,91 @@ fn cancellation_invalidates_late_success() {
 }
 
 #[test]
-fn automatic_lock_skips_unusable_accounts_but_explicit_lock_still_closes_gate() {
+fn account_without_credentials_locks_and_unlocks_with_a_swipe() {
+    let calls = Arc::new(AtomicUsize::new(0));
     let controller = AuthenticationController::with_backend(
         Box::new(FakeBackend {
             result: BackendResult::Success,
-            calls: Arc::new(AtomicUsize::new(0)),
+            calls: Arc::clone(&calls),
         }),
         None,
         false,
     )
     .unwrap();
-    for capability in [
-        lock_capability::Capability::Pending,
-        lock_capability::Capability::Unavailable,
-    ] {
-        lock_unpoisoned(&controller.shared.state).automatic_lock = capability;
-        assert!(!controller.lock_automatically());
-        assert!(!controller.locked());
-        assert!(!controller.security_gate_locked());
-    }
-    controller
-        .handle_packet(&packet(KIND_LOCK, 0, 0, b""))
-        .unwrap();
-    assert!(controller.locked());
-    assert!(controller.security_gate_locked());
-    // An unavailable probe must never release an already established lock.
+    lock_unpoisoned(&controller.shared.state).account_credential =
+        lock_capability::Capability::Unavailable;
     assert!(controller.lock_automatically());
-    assert!(controller.locked());
+    assert!(controller.security_gate_locked());
+    controller.begin(false);
+    let result = wait_for_event(&controller, |event| {
+        matches!(event.kind, AuthenticationEventKind::Result { .. })
+    });
+    assert!(matches!(
+        result.kind,
+        AuthenticationEventKind::Result { success: true, .. }
+    ));
+    assert!(!controller.locked());
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
 }
 
 #[test]
-fn automatic_lock_requires_native_authentication_and_preserves_unknown_policy() {
+fn swipe_unlock_needs_an_established_absence_of_credentials() {
+    for capability in [
+        lock_capability::Capability::Pending,
+        lock_capability::Capability::Unknown,
+        lock_capability::Capability::Available,
+    ] {
+        let controller = AuthenticationController::with_backend(
+            Box::new(FakeBackend {
+                result: BackendResult::Success,
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            None,
+            false,
+        )
+        .unwrap();
+        lock_unpoisoned(&controller.shared.state).account_credential = capability;
+        assert!(controller.lock_automatically());
+        controller.begin(false);
+        wait_for_event(&controller, |event| {
+            matches!(event.kind, AuthenticationEventKind::Prompt { .. })
+        });
+        assert!(controller.locked());
+    }
+}
+
+#[test]
+fn swipe_unlock_never_bypasses_a_pin_record() {
+    for readable in [true, false] {
+        let store = temporary_pin_store("swipe");
+        write_quick_record(&store, "1234");
+        if !readable {
+            std::fs::write(store.path(), b"not a record").unwrap();
+        }
+        let path = store.path().to_owned();
+        let controller = AuthenticationController::with_backend(
+            Box::new(FakeBackend {
+                result: BackendResult::Success,
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            Some(store),
+            false,
+        )
+        .unwrap();
+        lock_unpoisoned(&controller.shared.state).account_credential =
+            lock_capability::Capability::Unavailable;
+        controller.lock();
+        controller.begin(false);
+        wait_for_event(&controller, |event| {
+            matches!(event.kind, AuthenticationEventKind::Prompt { .. })
+        });
+        assert!(controller.locked());
+        remove_pin_store(&pin::PinStore::at(path));
+    }
+}
+
+#[test]
+fn automatic_lock_requires_native_authentication() {
     let controller = AuthenticationController::with_backend(
         Box::new(UnavailableBackend {
             reason: "no PAM".into(),
@@ -278,7 +332,7 @@ fn automatic_lock_requires_native_authentication_and_preserves_unknown_policy() 
         false,
     )
     .unwrap();
-    lock_unpoisoned(&controller.shared.state).automatic_lock =
+    lock_unpoisoned(&controller.shared.state).account_credential =
         lock_capability::Capability::Available;
     assert!(!controller.lock_automatically());
     assert!(!controller.locked());
