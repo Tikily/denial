@@ -264,9 +264,18 @@ pub(super) fn synchronize_idle_dpms_configuration(
     runtime: &mut flutter_runtime::FlutterRuntime,
     events: &mut RuntimeState,
 ) {
-    let Some(configuration) = runtime.take_idle_policy() else {
+    let Some(mut configuration) = runtime.take_idle_policy() else {
         return;
     };
+    // A phone's power button turns the screen off and on; it is pressed far
+    // too often to suspend or power off.
+    if events
+        .wayland
+        .as_ref()
+        .is_some_and(|frontend| frontend.mobile_shell())
+    {
+        configuration.power_button_action = idle_policy::PowerButtonAction::Dpms;
+    }
     if events
         .system_controls
         .as_ref()
