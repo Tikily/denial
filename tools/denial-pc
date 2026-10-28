@@ -1110,6 +1110,13 @@ test_compositor() {
     (
         cd -- "$COMPOSITOR_ROOT"
         require_file "$XDG_DESKTOP_PORTAL_FRONTEND"
+        # The private bus gets a runtime directory of its own: the Access
+        # backend makes its dialog socket there, and a builder account has none.
+        # The bus's document portal may still hold its FUSE mount in it.
+        runtime_dir="$(mktemp -d)"
+        trap 'fusermount3 -u -z "$runtime_dir/doc" 2>/dev/null || true
+              rm -rf -- "$runtime_dir"' EXIT
+        XDG_RUNTIME_DIR="$runtime_dir" \
         DENIAL_PORTAL_TEST_BUS=1 \
         DENIAL_PORTAL_FRONTEND_TEST="$XDG_DESKTOP_PORTAL_FRONTEND" \
         CARGO_TARGET_DIR="$RUST_TARGET" \
