@@ -540,14 +540,12 @@ fn private_bus_verification_and_cleanup() {
         });
         match expected {
             Some(expected) => {
-                // A match leaves the reader claimed for the caller to release
-                // after unlocking; every other result has released it.
+                // A result leaves the reader claimed for the caller to
+                // release after acting on it.
                 let (verification, device) = result.unwrap();
                 assert_eq!(verification, expected);
-                assert_eq!(device.is_some(), expected == Verification::Match);
-                if let Some(device) = device {
-                    stop_and_release(&device);
-                }
+                assert_eq!(stops.load(Ordering::SeqCst), index);
+                stop_and_release(&device.unwrap());
             }
             None => assert!(result.is_err()),
         }

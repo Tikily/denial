@@ -52,8 +52,9 @@ pub(super) trait FingerprintBackend {
 
 #[derive(Default)]
 pub(super) struct FprintBackend {
-    /// The reader a match left claimed, stopped and released off the unlock
-    /// path: fprintd answers VerifyStop only once its driver has cleaned up.
+    /// The reader a verification left claimed, stopped and released off the
+    /// result path: fprintd answers VerifyStop only once its driver has
+    /// cleaned up.
     releasing: Option<JoinHandle<()>>,
 }
 
@@ -65,7 +66,7 @@ impl FingerprintBackend for FprintBackend {
         cancelled: &dyn Fn() -> bool,
         changed: &Wakeup,
     ) -> Verification {
-        // The next scan claims the reader only once the last match let it go.
+        // The next scan claims the reader only once the last one let it go.
         if let Some(releasing) = self.releasing.take() {
             let _ = releasing.join();
         }
@@ -110,8 +111,8 @@ impl FingerprintBackend for FprintBackend {
     }
 }
 
-/// The verification, and on a match the reader still claimed: the unlock
-/// goes first and the reader is let go after it.
+/// The verification, and the reader still claimed when it was reached: the
+/// unlock or the rejection goes first and the reader is let go after it.
 fn verify_connection(
     connection: &Connection,
     armed: &dyn Fn(),
@@ -157,14 +158,15 @@ fn verify_connection(
             continue;
         }
         device.call::<_, _, ()>("Claim", &("",))?;
-        let result = verify_claimed_device(&device, armed, scanning, cancelled, changed);
-        if matches!(result, Ok(Verification::Match)) {
-            return Ok((Verification::Match, Some(device)));
-        }
         // Always stop/release, including cancellation, no-match, malformed
         // signals and VerifyStart failure. Connection close is the fallback.
-        stop_and_release(&device);
-        return result.map(|verification| (verification, None));
+        return match verify_claimed_device(&device, armed, scanning, cancelled, changed) {
+            Ok(verification) => Ok((verification, Some(device))),
+            Err(error) => {
+                stop_and_release(&device);
+                Err(error)
+            }
+        };
     }
     Ok((Verification::Unavailable, None))
 }
