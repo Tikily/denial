@@ -109,6 +109,16 @@ void main() {
       const Rect.fromLTWH(0.25, 0.75, 0.125, 0.0625),
     );
     expect(state.pinLength, 4);
+    expect(state.fingerprintScanning, isFalse);
+
+    service.emit(
+      _credential(pinLength: 4, payload: '{"fingerprint":{"scanning":true}}'),
+    );
+    expect(container.read(authenticationProvider).fingerprintScanning, isTrue);
+    service.emit(
+      _credential(pinLength: 4, payload: '{"fingerprint":{"scanning":false}}'),
+    );
+    expect(container.read(authenticationProvider).fingerprintScanning, isFalse);
 
     service.emit(_credential(pinLength: 4, payload: '{"fingerprint":{}}'));
     state = container.read(authenticationProvider);

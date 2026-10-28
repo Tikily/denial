@@ -224,6 +224,7 @@ impl FingerprintBackend for ControlledBackend {
     fn verify(
         &mut self,
         _armed: &dyn Fn(),
+        _scanning: &dyn Fn(bool),
         cancelled: &dyn Fn() -> bool,
         _changed: &Wakeup,
     ) -> Verification {
@@ -319,6 +320,21 @@ fn armed_reader_is_announced_once_and_stays_marked_between_scans() {
     publish_readiness(&controller.shared, false);
     let event = controller.try_event().expect("re-arming");
     assert!(event.message.contains(r#""ready":false"#));
+}
+
+#[test]
+fn scan_feedback_is_advisory_and_clears() {
+    let controller = controller(true);
+    publish_readiness(&controller.shared, true);
+    while controller.try_event().is_some() {}
+    publish_scanning(&controller.shared, true);
+    let event = controller.try_event().expect("scan start");
+    assert!(event.message.contains(r#""scanning":true"#));
+    assert!(controller.locked());
+    publish_scanning(&controller.shared, false);
+    let event = controller.try_event().expect("scan end");
+    assert!(event.message.contains(r#""scanning":false"#));
+    assert!(controller.locked());
 }
 
 #[test]
@@ -431,6 +447,10 @@ impl MockDevice {
     fn claim(&self, username: &str) {
         assert_eq!(username, "");
     }
+    #[zbus(property, name = "finger-present")]
+    fn finger_present(&self) -> bool {
+        false
+    }
     async fn verify_start(
         &self,
         finger: &str,
@@ -518,6 +538,7 @@ fn private_bus_verification_and_cleanup() {
             verify_connection(
                 &client,
                 &|| {},
+                &|_| {},
                 &|| signal == "silent" && start.elapsed() > Duration::from_millis(200),
                 &changed,
             )
@@ -530,6 +551,62 @@ fn private_bus_verification_and_cleanup() {
         assert_eq!(releases.load(Ordering::SeqCst), index + 1);
         client.close().unwrap();
     }
+    // The fprintd property is advisory: it must reach the UI callback,
+    // while only the following VerifyStatus can complete authentication.
+    *lock_unpoisoned(&status) = "silent".into();
+    let client = Builder::session()
+        .unwrap()
+        .method_timeout(CALL_TIMEOUT)
+        .build()
+        .unwrap();
+    let changed = Wakeup::new().unwrap();
+    let seen = std::sync::atomic::AtomicBool::new(false);
+    let before = starts.load(Ordering::SeqCst);
+    let result = thread::scope(|scope| {
+        scope.spawn(|| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while starts.load(Ordering::SeqCst) == before {
+                assert!(Instant::now() < deadline);
+                thread::yield_now();
+            }
+            let mut values = std::collections::HashMap::new();
+            values.insert("finger-present", zbus::zvariant::Value::from(true));
+            server
+                .emit_signal(
+                    None::<&str>,
+                    "/net/reactivated/Fprint/Device/0",
+                    "org.freedesktop.DBus.Properties",
+                    "PropertiesChanged",
+                    &(DEVICE_INTERFACE, values, Vec::<&str>::new()),
+                )
+                .unwrap();
+            while !seen.load(Ordering::SeqCst) && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            server
+                .emit_signal(
+                    None::<&str>,
+                    "/net/reactivated/Fprint/Device/0",
+                    DEVICE_INTERFACE,
+                    "VerifyStatus",
+                    &("verify-match", true),
+                )
+                .unwrap();
+        });
+        verify_connection(
+            &client,
+            &|| {},
+            &|active| {
+                seen.store(active, Ordering::SeqCst);
+            },
+            &|| false,
+            &changed,
+        )
+    });
+    assert_eq!(result.unwrap(), Verification::Match);
+    assert!(seen.load(Ordering::SeqCst));
+    client.close().unwrap();
+
     *lock_unpoisoned(&status) = "silent".into();
     let (finished, result) = mpsc::channel();
     let worker = thread::spawn(move || {
@@ -539,12 +616,12 @@ fn private_bus_verification_and_cleanup() {
             .build()
             .unwrap();
         let changed = Wakeup::new().unwrap();
-        let result = verify_connection(&client, &|| {}, &|| false, &changed);
+        let result = verify_connection(&client, &|| {}, &|_| {}, &|| false, &changed);
         client.close().unwrap();
         finished.send(result).unwrap();
     });
     let deadline = Instant::now() + Duration::from_secs(2);
-    while starts.load(Ordering::SeqCst) != 6 {
+    while starts.load(Ordering::SeqCst) != 7 {
         assert!(Instant::now() < deadline);
         thread::yield_now();
     }

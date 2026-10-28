@@ -470,6 +470,7 @@ class _LockFingerprintRing extends StatefulWidget {
   const _LockFingerprintRing({
     required this.present,
     required this.ready,
+    required this.scanning,
     required this.sensor,
     required this.face,
     required this.fadeDistance,
@@ -477,6 +478,7 @@ class _LockFingerprintRing extends StatefulWidget {
 
   final bool present;
   final bool ready;
+  final bool scanning;
 
   /// Panel fractions in the panel's native orientation.
   final Rect? sensor;
@@ -505,6 +507,13 @@ class _LockFingerprintRingState extends State<_LockFingerprintRing>
     value: widget.ready ? 1.0 : 0.0,
   );
 
+  late final AnimationController _scanning = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+    reverseDuration: const Duration(milliseconds: 220),
+    value: widget.scanning ? 1.0 : 0.0,
+  );
+
   @override
   void didUpdateWidget(covariant _LockFingerprintRing oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -516,6 +525,15 @@ class _LockFingerprintRingState extends State<_LockFingerprintRing>
         _present.forward();
       } else {
         _present.reverse();
+      }
+    }
+    if (oldWidget.scanning != widget.scanning) {
+      if (still) {
+        _scanning.value = widget.scanning ? 1.0 : 0.0;
+      } else if (widget.scanning) {
+        _scanning.forward();
+      } else {
+        _scanning.reverse();
       }
     }
     if (oldWidget.ready != widget.ready) {
@@ -533,6 +551,7 @@ class _LockFingerprintRingState extends State<_LockFingerprintRing>
   void dispose() {
     _present.dispose();
     _ready.dispose();
+    _scanning.dispose();
     super.dispose();
   }
 
@@ -543,6 +562,7 @@ class _LockFingerprintRingState extends State<_LockFingerprintRing>
         painter: _LockFingerprintRingPainter(
           present: _present,
           ready: _ready,
+          scanning: _scanning,
           face: widget.face,
           fadeDistance: widget.fadeDistance,
           sensor: widget.sensor,
@@ -556,13 +576,15 @@ class _LockFingerprintRingPainter extends CustomPainter {
   _LockFingerprintRingPainter({
     required this.present,
     required this.ready,
+    required this.scanning,
     required this.face,
     required this.fadeDistance,
     required this.sensor,
-  }) : super(repaint: Listenable.merge([present, ready, face]));
+  }) : super(repaint: Listenable.merge([present, ready, scanning, face]));
 
   final Animation<double> present;
   final Animation<double> ready;
+  final Animation<double> scanning;
   final ValueListenable<Offset> face;
   final double fadeDistance;
   final Rect? sensor;
@@ -589,7 +611,7 @@ class _LockFingerprintRingPainter extends CustomPainter {
     )!;
     canvas.drawCircle(
       center,
-      _radius,
+      _radius * (1.0 + 0.35 * scanning.value),
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = _stroke
@@ -601,6 +623,7 @@ class _LockFingerprintRingPainter extends CustomPainter {
   bool shouldRepaint(covariant _LockFingerprintRingPainter oldDelegate) =>
       oldDelegate.present != present ||
       oldDelegate.ready != ready ||
+      oldDelegate.scanning != scanning ||
       oldDelegate.face != face ||
       oldDelegate.fadeDistance != fadeDistance ||
       oldDelegate.sensor != sensor;

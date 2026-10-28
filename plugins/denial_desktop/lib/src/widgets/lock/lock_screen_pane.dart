@@ -346,6 +346,7 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
                 _LockFingerprintRing(
                   present: authentication.fingerprintReader,
                   ready: authentication.fingerprintAvailable,
+                  scanning: authentication.fingerprintScanning,
                   sensor: authentication.fingerprintSensor,
                   face: _face,
                   fadeDistance: _dragDistance(size.height) * _unlockThreshold,

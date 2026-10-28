@@ -44,6 +44,7 @@ pub(super) trait FingerprintBackend {
     fn verify(
         &mut self,
         armed: &dyn Fn(),
+        scanning: &dyn Fn(bool),
         cancelled: &dyn Fn() -> bool,
         changed: &Wakeup,
     ) -> Verification;
@@ -55,12 +56,13 @@ impl FingerprintBackend for FprintBackend {
     fn verify(
         &mut self,
         armed: &dyn Fn(),
+        scanning: &dyn Fn(bool),
         cancelled: &dyn Fn() -> bool,
         changed: &Wakeup,
     ) -> Verification {
         let result = (|| {
             let connection = Builder::system()?.method_timeout(CALL_TIMEOUT).build()?;
-            let result = verify_connection(&connection, armed, cancelled, changed);
+            let result = verify_connection(&connection, armed, scanning, cancelled, changed);
             // A separate connection per operation prevents old signals from
             // crossing a retry and ensures any abandoned claim is released.
             let _ = connection.close();
@@ -88,6 +90,7 @@ impl FingerprintBackend for FprintBackend {
 fn verify_connection(
     connection: &Connection,
     armed: &dyn Fn(),
+    scanning: &dyn Fn(bool),
     cancelled: &dyn Fn() -> bool,
     changed: &Wakeup,
 ) -> zbus::Result<Verification> {
@@ -129,7 +132,7 @@ fn verify_connection(
             continue;
         }
         device.call::<_, _, ()>("Claim", &("",))?;
-        let result = verify_claimed_device(&device, armed, cancelled, changed);
+        let result = verify_claimed_device(&device, armed, scanning, cancelled, changed);
         // Always stop/release, including cancellation, no-match, malformed
         // signals and VerifyStart failure. Connection close is the fallback.
         let _ = device.call::<_, _, ()>("VerifyStop", &());
@@ -142,12 +145,21 @@ fn verify_connection(
 fn verify_claimed_device(
     device: &Proxy<'_>,
     armed: &dyn Fn(),
+    scanning: &dyn Fn(bool),
     cancelled: &dyn Fn() -> bool,
     changed: &Wakeup,
 ) -> zbus::Result<Verification> {
     // Subscribe before starting, to retain even an immediate match. The proxy
     // filters sender, object path, interface and member against the pinned owner.
     let mut statuses = future::block_on(device.inner().receive_signal("VerifyStatus"))?;
+    // Proxy properties are cached lazily; the stream is inert until the
+    // first read initializes the cache. Older daemons may lack this property.
+    let _ = device.get_property::<bool>("finger-present");
+    let mut fingers = future::block_on(
+        device
+            .inner()
+            .receive_property_changed::<bool>("finger-present"),
+    );
     let mut owner_changes = future::block_on(device.inner().receive_owner_changed())?;
     if cancelled() {
         return Ok(Verification::Cancelled);
@@ -159,25 +171,43 @@ fn verify_claimed_device(
         if cancelled() {
             return Ok(Verification::Cancelled);
         }
-        let status = future::block_on(future::race(
-            future::race(async { Some(statuses.next().await) }, async {
+        enum ScanEvent {
+            Status(Option<zbus::Message>),
+            Owner,
+            Finger(Option<bool>),
+            Changed,
+        }
+        let event = future::block_on(future::race(
+            future::race(async { ScanEvent::Status(statuses.next().await) }, async {
                 owner_changes.next().await;
-                Some(None)
+                ScanEvent::Owner
             }),
-            async {
-                changed.wait().await;
-                None
-            },
+            future::race(
+                async {
+                    let value = match fingers.next().await {
+                        Some(change) => change.get().await.ok(),
+                        None => None,
+                    };
+                    ScanEvent::Finger(value)
+                },
+                async {
+                    changed.wait().await;
+                    ScanEvent::Changed
+                },
+            ),
         ));
-        match status {
-            Some(Some(message)) => {
+        match event {
+            ScanEvent::Status(Some(message)) => {
                 let (status, done): (String, bool) = message.body().deserialize()?;
                 if let Some(result) = classify_status(&status, done) {
                     return Ok(result);
                 }
             }
-            Some(None) => return Ok(Verification::Unavailable),
-            None => {}
+            ScanEvent::Status(None) | ScanEvent::Owner | ScanEvent::Finger(None) => {
+                return Ok(Verification::Unavailable);
+            }
+            ScanEvent::Finger(Some(present)) => scanning(present),
+            ScanEvent::Changed => {}
         }
     }
 }
@@ -239,14 +269,29 @@ pub(super) fn run_worker(
             previous_epoch = Some(epoch);
         }
         let armed_at = Cell::new(None);
+        let touch_at = Cell::new(None::<Instant>);
         let result = backend.verify(
             &|| {
                 armed_at.set(Some(Instant::now()));
                 publish_readiness(shared, true);
             },
+            &|active| {
+                if active && !cancelled(shared, epoch) {
+                    touch_at.set(Some(Instant::now()));
+                }
+                publish_scanning(shared, active && !cancelled(shared, epoch));
+            },
             &|| cancelled(shared, epoch),
             &shared.fingerprint_changed,
         );
+        if let Some(touch) = touch_at.get() {
+            info!(
+                elapsed_ms = touch.elapsed().as_millis() as u64,
+                ?result,
+                "fingerprint touch through account validation"
+            );
+        }
+        publish_scanning(shared, false);
         // Between scans the reader is not listening; the lock screen shows
         // that until the next attempt arms it.
         publish_readiness(shared, false);
@@ -298,6 +343,15 @@ fn publish_readiness(shared: &SharedAuthentication, ready: bool) {
     if state.fingerprint_ready != ready || (ready && !state.fingerprint_known) {
         state.fingerprint_ready = ready;
         state.fingerprint_known |= ready;
+        shared.push_event(credential_event(shared, &state));
+    }
+}
+
+/// Contact feedback is advisory; it never grants authentication.
+fn publish_scanning(shared: &SharedAuthentication, scanning: bool) {
+    let mut state = lock_unpoisoned(&shared.state);
+    if state.fingerprint_scanning != scanning {
+        state.fingerprint_scanning = scanning;
         shared.push_event(credential_event(shared, &state));
     }
 }

@@ -844,6 +844,8 @@ struct AuthenticationState {
     pin_length: u32,
     /// A fingerprint reader with enrolled prints is armed for unlock.
     fingerprint_ready: bool,
+    /// A finger is on the sensor and a verification is in progress.
+    fingerprint_scanning: bool,
     /// The reader has armed since deniald started, so the lock screen keeps
     /// marking the sensor while it re-arms between scans.
     fingerprint_known: bool,
@@ -991,6 +993,7 @@ impl AuthenticationController {
                 response: None,
                 pin_length: 0,
                 fingerprint_ready: false,
+                fingerprint_scanning: false,
                 fingerprint_known: false,
                 fingerprint_offered: true,
                 fingerprint_enabled: true,
@@ -1529,7 +1532,7 @@ fn credential_event(
             },
         );
         serde_json::json!({
-            "fingerprint": {"sensor": sensor, "ready": state.fingerprint_ready}
+            "fingerprint": {"sensor": sensor, "ready": state.fingerprint_ready, "scanning": state.fingerprint_scanning}
         })
         .to_string()
     } else {
