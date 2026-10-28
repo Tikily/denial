@@ -544,7 +544,16 @@ fn private_bus_verification_and_cleanup() {
             )
         });
         match expected {
-            Some(expected) => assert_eq!(result.unwrap(), expected),
+            Some(expected) => {
+                // A match leaves the reader claimed for the caller to release
+                // after unlocking; every other result has released it.
+                let (verification, device) = result.unwrap();
+                assert_eq!(verification, expected);
+                assert_eq!(device.is_some(), expected == Verification::Match);
+                if let Some(device) = device {
+                    stop_and_release(&device);
+                }
+            }
             None => assert!(result.is_err()),
         }
         assert_eq!(stops.load(Ordering::SeqCst), index + 1);
@@ -603,7 +612,9 @@ fn private_bus_verification_and_cleanup() {
             &changed,
         )
     });
-    assert_eq!(result.unwrap(), Verification::Match);
+    let (verification, device) = result.unwrap();
+    assert_eq!(verification, Verification::Match);
+    stop_and_release(&device.unwrap());
     assert!(seen.load(Ordering::SeqCst));
     client.close().unwrap();
 
@@ -616,7 +627,8 @@ fn private_bus_verification_and_cleanup() {
             .build()
             .unwrap();
         let changed = Wakeup::new().unwrap();
-        let result = verify_connection(&client, &|| {}, &|_| {}, &|| false, &changed);
+        let result = verify_connection(&client, &|| {}, &|_| {}, &|| false, &changed)
+            .map(|(verification, _)| verification);
         client.close().unwrap();
         finished.send(result).unwrap();
     });

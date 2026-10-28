@@ -936,7 +936,7 @@ impl AuthenticationController {
             .name("denial-fingerprint".into())
             .spawn(move || {
                 crate::cpu_scheduling::normalize_current_worker("fingerprint");
-                fingerprint::run_worker(&shared, &mut fingerprint::FprintBackend);
+                fingerprint::run_worker(&shared, &mut fingerprint::FprintBackend::default());
             })?;
         *lock_unpoisoned(&controller.fingerprint_worker) = Some(worker);
         lock_unpoisoned(&controller.shared.state).account_credential =

@@ -50,7 +50,12 @@ pub(super) trait FingerprintBackend {
     ) -> Verification;
 }
 
-pub(super) struct FprintBackend;
+#[derive(Default)]
+pub(super) struct FprintBackend {
+    /// The reader a match left claimed, stopped and released off the unlock
+    /// path: fprintd answers VerifyStop only once its driver has cleaned up.
+    releasing: Option<JoinHandle<()>>,
+}
 
 impl FingerprintBackend for FprintBackend {
     fn verify(
@@ -60,13 +65,31 @@ impl FingerprintBackend for FprintBackend {
         cancelled: &dyn Fn() -> bool,
         changed: &Wakeup,
     ) -> Verification {
+        // The next scan claims the reader only once the last match let it go.
+        if let Some(releasing) = self.releasing.take() {
+            let _ = releasing.join();
+        }
         let result = (|| {
             let connection = Builder::system()?.method_timeout(CALL_TIMEOUT).build()?;
             let result = verify_connection(&connection, armed, scanning, cancelled, changed);
             // A separate connection per operation prevents old signals from
             // crossing a retry and ensures any abandoned claim is released.
-            let _ = connection.close();
-            result
+            match result {
+                Ok((verification, Some(device))) => {
+                    let releasing = thread::Builder::new()
+                        .name("fingerprint-release".into())
+                        .spawn(move || {
+                            stop_and_release(&device);
+                            let _ = connection.close();
+                        });
+                    self.releasing = releasing.ok();
+                    Ok(verification)
+                }
+                result => {
+                    let _ = connection.close();
+                    result.map(|(verification, _)| verification)
+                }
+            }
         })();
         match result {
             Ok(Verification::Match) if !cancelled() => {
@@ -87,15 +110,17 @@ impl FingerprintBackend for FprintBackend {
     }
 }
 
+/// The verification, and on a match the reader still claimed: the unlock
+/// goes first and the reader is let go after it.
 fn verify_connection(
     connection: &Connection,
     armed: &dyn Fn(),
     scanning: &dyn Fn(bool),
     cancelled: &dyn Fn() -> bool,
     changed: &Wakeup,
-) -> zbus::Result<Verification> {
+) -> zbus::Result<(Verification, Option<Proxy<'static>>)> {
     if cancelled() {
-        return Ok(Verification::Cancelled);
+        return Ok((Verification::Cancelled, None));
     }
     let manager = Proxy::new(
         connection,
@@ -116,7 +141,7 @@ fn verify_connection(
     let devices: Vec<OwnedObjectPath> = manager.call("GetDevices", &())?;
     for path in devices {
         if cancelled() {
-            return Ok(Verification::Cancelled);
+            return Ok((Verification::Cancelled, None));
         }
         let device = Proxy::new(connection, owner.clone(), path, DEVICE_INTERFACE)?;
         // An empty username selects the authenticated bus caller, never an
@@ -133,13 +158,20 @@ fn verify_connection(
         }
         device.call::<_, _, ()>("Claim", &("",))?;
         let result = verify_claimed_device(&device, armed, scanning, cancelled, changed);
+        if matches!(result, Ok(Verification::Match)) {
+            return Ok((Verification::Match, Some(device)));
+        }
         // Always stop/release, including cancellation, no-match, malformed
         // signals and VerifyStart failure. Connection close is the fallback.
-        let _ = device.call::<_, _, ()>("VerifyStop", &());
-        let _ = device.call::<_, _, ()>("Release", &());
-        return result;
+        stop_and_release(&device);
+        return result.map(|verification| (verification, None));
     }
-    Ok(Verification::Unavailable)
+    Ok((Verification::Unavailable, None))
+}
+
+fn stop_and_release(device: &Proxy<'_>) {
+    let _ = device.call::<_, _, ()>("VerifyStop", &());
+    let _ = device.call::<_, _, ()>("Release", &());
 }
 
 fn verify_claimed_device(
