@@ -2,6 +2,8 @@
 //! credential: a PIN unlock still passes PAM account policy, the lock screen
 //! always offers the password next to the PIN, and outside the lock screen
 //! the PIN only proves itself to Settings, to change it or the fingerprints.
+//! Settings asks for the account password only to set the first PIN, or one
+//! forgotten, and to turn PIN unlock off.
 //! Fingerprint unlock needs a PIN: without a record the reader stays off.
 //!
 //! NX809J records contain the opaque Gatekeeper handle and SID; other devices
@@ -431,30 +433,45 @@ pub(crate) fn run_settings() -> Result<(), Box<dyn Error>> {
                     current.as_bytes(),
                     secret("PIN input closed")?.as_bytes(),
                 )?
-            } else if let Some(credential) = record.as_ref().and_then(|r| r.native.as_ref()) {
-                match gatekeeper::verify(credential, current.as_bytes(), 0) {
-                    Ok(mut token) => {
-                        erase_bytes(&mut token);
-                        json!({"event": "confirmed"})
-                    }
-                    Err(gatekeeper::Failure::Rejected) => json!({"event": "wrong-pin"}),
-                    Err(gatekeeper::Failure::Throttled(ms)) => {
-                        json!({"event": "rate-limited", "retry_ms": ms})
-                    }
-                    Err(error) => return Err(error.into()),
-                }
-            } else if !record.is_some_and(|r| r.verify(current.as_bytes())) {
-                json!({"event": "wrong-pin"})
-            } else if command == b"check" {
-                json!({"event": "confirmed"})
             } else {
-                save_event(&store, &secret("PIN input closed")?)?
+                let checked = check_event(record.as_ref(), &current)?;
+                if command == b"check" || checked["event"] != "confirmed" {
+                    checked
+                } else {
+                    save_event(&store, &secret("PIN input closed")?)?
+                }
             }
         }
         _ => return Err("unknown lock PIN command".into()),
     };
     println!("{reply}");
     Ok(())
+}
+
+/// Whether `pin` is the PIN of `record`: `confirmed`, `wrong-pin`, or
+/// `rate-limited` with the provider's wait. No record means a wrong PIN.
+pub(super) fn check_event(
+    record: Option<&PinRecord>,
+    pin: &SecureString,
+) -> Result<Value, Box<dyn Error>> {
+    if let Some(credential) = record.and_then(|r| r.native.as_ref()) {
+        return Ok(match gatekeeper::verify(credential, pin.as_bytes(), 0) {
+            Ok(mut token) => {
+                erase_bytes(&mut token);
+                json!({"event": "confirmed"})
+            }
+            Err(gatekeeper::Failure::Rejected) => json!({"event": "wrong-pin"}),
+            Err(gatekeeper::Failure::Throttled(ms)) => {
+                json!({"event": "rate-limited", "retry_ms": ms})
+            }
+            Err(error) => return Err(error.into()),
+        });
+    }
+    Ok(if record.is_some_and(|r| r.verify(pin.as_bytes())) {
+        json!({"event": "confirmed"})
+    } else {
+        json!({"event": "wrong-pin"})
+    })
 }
 
 fn save_event(store: &PinStore, pin: &SecureString) -> io::Result<Value> {

@@ -3976,11 +3976,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get fingerprintSection => 'Fingerprint';
 
   @override
-  String get fingerprintPasswordPrompt =>
-      'Enter your sudo password to manage fingerprints.';
+  String get fingerprintPinPrompt =>
+      'Enter your lock PIN to manage fingerprints.';
 
   @override
-  String get fingerprintSudoPassword => 'Sudo password';
+  String get fingerprintPin => 'PIN';
 
   @override
   String get fingerprintContinue => 'Continue';
@@ -4006,11 +4006,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get fingerprintAdd => 'Add fingerprint';
 
   @override
-  String get fingerprintAuthenticationFailed =>
-      'Password verification failed. Try again.';
+  String get fingerprintPinNotSet => 'Set a lock PIN first.';
 
   @override
-  String get fingerprintExpired => 'Enter your password again to continue.';
+  String get fingerprintExpired => 'Enter your PIN again to continue.';
 
   @override
   String get fingerprintPreparing => 'Preparing the fingerprint reader…';

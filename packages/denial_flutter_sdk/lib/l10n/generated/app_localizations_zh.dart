@@ -3791,10 +3791,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get fingerprintSection => '指纹';
 
   @override
-  String get fingerprintPasswordPrompt => '请输入 sudo 密码以管理指纹。';
+  String get fingerprintPinPrompt => '请输入锁屏 PIN 码以管理指纹。';
 
   @override
-  String get fingerprintSudoPassword => 'sudo 密码';
+  String get fingerprintPin => 'PIN 码';
 
   @override
   String get fingerprintContinue => '继续';
@@ -3818,10 +3818,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get fingerprintAdd => '添加指纹';
 
   @override
-  String get fingerprintAuthenticationFailed => '密码验证失败，请重试。';
+  String get fingerprintPinNotSet => '请先设置锁屏 PIN 码。';
 
   @override
-  String get fingerprintExpired => '请重新输入密码以继续。';
+  String get fingerprintExpired => '请重新输入 PIN 码以继续。';
 
   @override
   String get fingerprintPreparing => '正在准备指纹读取器…';

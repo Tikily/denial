@@ -19,6 +19,7 @@ enum LockPinOutcome {
   saved,
   cleared,
   authenticationFailed,
+  wrongPin,
   invalidPin,
   unavailable,
 }
@@ -33,8 +34,8 @@ final lockPinServiceProvider = Provider<LockPinService>(
 );
 
 /// Settings side of the optional lock PIN. `deniald --lock-pin` runs as the
-/// session user and verifies the account password itself before it writes or
-/// removes the PIN. Secrets travel one per stdin line, never through argv,
+/// session user and verifies the account password, or the current PIN for a
+/// change, itself before it writes or removes the PIN. Secrets travel one per stdin line, never through argv,
 /// the environment or logs.
 class LockPinService {
   const LockPinService();
@@ -60,7 +61,20 @@ class LockPinService {
   }) async {
     if (!_validPassword(password)) return LockPinOutcome.authenticationFailed;
     if (!isValidLockPin(pin)) return LockPinOutcome.invalidPin;
-    return _outcome(await _run(['set', password, pin, ?currentPin]));
+    final current = currentPin?.isNotEmpty == true ? currentPin : null;
+    return _outcome(await _run(['set', password, pin, ?current]));
+  }
+
+  /// Replaces the PIN in use, proven by the current PIN alone.
+  Future<LockPinOutcome> change({
+    required String currentPin,
+    required String pin,
+  }) async {
+    if (!isValidLockPin(pin)) return LockPinOutcome.invalidPin;
+    if (!RegExp(r'^[0-9]{4,12}$').hasMatch(currentPin)) {
+      return LockPinOutcome.wrongPin;
+    }
+    return _outcome(await _run(['change', currentPin, pin]));
   }
 
   Future<LockPinOutcome> clear({required String password}) async {
@@ -77,8 +91,8 @@ class LockPinService {
       switch (reply?['event']) {
         'saved' => LockPinOutcome.saved,
         'cleared' => LockPinOutcome.cleared,
-        'authentication-failed' ||
-        'wrong-pin' => LockPinOutcome.authenticationFailed,
+        'authentication-failed' => LockPinOutcome.authenticationFailed,
+        'wrong-pin' => LockPinOutcome.wrongPin,
         'invalid-pin' => LockPinOutcome.invalidPin,
         _ => LockPinOutcome.unavailable,
       };

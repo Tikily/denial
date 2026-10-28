@@ -1,5 +1,10 @@
 //! Sudo-launched, stdin/stdout-only fingerprint management session.
-//! Never starts a compositor or accepts a target user/command from Flutter.
+//! Never starts a compositor or accepts a target user/command from Settings.
+//!
+//! The lock PIN opens it: fingerprints need one, so the PIN is the credential
+//! that guards them, and sudo's rule for this one command needs no password.
+//! The session keeps the PIN until it ends, for each enrollment's Gatekeeper
+//! authorization where the reader needs one.
 use super::*;
 use futures_lite::{StreamExt, future};
 use serde_json::{Value, json};
@@ -25,7 +30,6 @@ const FINGERS: [&str; 10] = [
 
 struct SettingsCommand {
     value: Value,
-    pin: Option<SecureString>,
 }
 
 fn emit(value: Value) -> io::Result<()> {
@@ -44,29 +48,30 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     if uid == 0 {
         return Err("a non-root session user is required".into());
     }
-    // Preserve effective privilege for fprintd but use the invoking real UID
-    // for PAM, so pam_rootok cannot bypass password verification under sudo.
+    // Keep effective privilege for fprintd, but take the invoking user as the
+    // real UID: the PIN record must belong to it.
     // SAFETY: this branch runs before any process threads are started.
     if unsafe { libc::setresuid(uid, 0, 0) } != 0 {
         return Err(io::Error::last_os_error().into());
     }
     let username = current_username();
-    let mut input = BufReader::new(io::stdin());
-    emit(json!({"event":"password"}))?;
-    let mut bytes = read_bounded_line(&mut input)?.ok_or("password input closed")?;
-    let password = SecureString::new(&bytes);
-    erase_bytes(&mut bytes);
-    let mut backend = PamBackend {
-        api: PamApi::load()?,
-        service: CString::new("sudo")?,
+    let store = pin::PinStore::for_uid(uid).ok_or("no state directory for the lock PIN")?;
+    let Some(record) = store.load()? else {
+        emit(json!({"event":"pin-not-configured"}))?;
+        return Ok(());
     };
-    let result = authenticate_password(&mut backend, &username, &password);
-    drop(password);
-    if result != BackendResult::Success {
-        emit(json!({"event":"authentication-failed"}))?;
+    let mut input = BufReader::new(io::stdin());
+    emit(json!({"event":"pin","length":record.length()}))?;
+    let mut bytes = read_bounded_line(&mut input)?.ok_or("PIN input closed")?;
+    let pin = SecureString::new(&bytes);
+    erase_bytes(&mut bytes);
+    let checked = pin::check_event(Some(&record), &pin)?;
+    drop(record);
+    if checked["event"] != "confirmed" {
+        emit(checked)?;
         return Ok(());
     }
-    // No biometric metadata is queried or emitted until PAM succeeds.
+    // No biometric metadata is queried or emitted until the PIN is right.
     let connection = Builder::system()?
         .method_timeout(Duration::from_secs(3))
         .build()?;
@@ -95,24 +100,13 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
             let Ok(value) = serde_json::from_slice::<Value>(&line) else {
                 break;
             };
-            // The PIN occupies its own private line, never a JSON object/log.
-            let pin = if value.get("native_pin").and_then(Value::as_bool) == Some(true) {
-                let Ok(Some(mut bytes)) = read_bounded_line(&mut input) else {
-                    break;
-                };
-                let pin = SecureString::new(&bytes);
-                erase_bytes(&mut bytes);
-                Some(pin)
-            } else {
-                None
-            };
-            if commands.send(SettingsCommand { value, pin }).is_err() {
+            if commands.send(SettingsCommand { value }).is_err() {
                 break;
             }
         }
     });
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
-        let mut command = match receiver.recv_timeout(remaining) {
+        let command = match receiver.recv_timeout(remaining) {
             Ok(command) => command,
             Err(_) => break,
         };
@@ -136,13 +130,6 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
                 let authorization = if gatekeeper::enabled() {
-                    let Some(pin) = command.pin.take().filter(|p| pin::valid_pin(p.as_bytes()))
-                    else {
-                        emit(json!({"event":"error","code":"pin-required"}))?;
-                        continue;
-                    };
-                    let store = pin::PinStore::for_uid(uid)
-                        .ok_or("native credential storage unavailable")?;
                     let credential = match store.enrollment_credential() {
                         Ok(credential) => credential,
                         Err(_) => {
@@ -150,6 +137,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
                             continue;
                         }
                     };
+                    let pin = SecureString::new(pin.as_bytes());
                     Some(gatekeeper::Authorization::start(credential, pin)?)
                 } else {
                     None
@@ -174,6 +162,22 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
                 drop(authorization);
                 publish_fingers(&device, &username)?;
             }
+            Some("delete") => {
+                let finger = command
+                    .value
+                    .get("finger")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if !FINGERS.contains(&finger) {
+                    emit(json!({"event":"error","code":"invalid-finger"}))?;
+                    continue;
+                }
+                if let Err(error) = delete(&device, &username, finger) {
+                    eprintln!("fingerprint removal: {error}");
+                    emit(json!({"event":"error","code":"delete-failed"}))?;
+                }
+                publish_fingers(&device, &username)?;
+            }
             Some("cancel") => {}
             _ => break,
         }
@@ -195,8 +199,23 @@ fn list_fingers(device: &Proxy<'_>, username: &str) -> zbus::Result<Vec<String>>
 
 fn publish_fingers(device: &Proxy<'_>, username: &str) -> Result<(), Box<dyn Error>> {
     let fingers = list_fingers(device, username)?;
-    emit(json!({"event":"ready","fingers":fingers,"pin_required":gatekeeper::enabled()}))?;
+    emit(json!({"event":"ready","fingers":fingers}))?;
     Ok(())
+}
+
+fn delete(device: &Proxy<'_>, username: &str, finger: &str) -> zbus::Result<()> {
+    device.call::<_, _, ()>("Claim", &(username,))?;
+    let result = match device.call::<_, _, ()>("DeleteEnrolledFinger", &(finger,)) {
+        // fprintd forgets the finger even when the reader keeps it.
+        Err(zbus::Error::MethodError(name, _, _))
+            if name.as_str() == "net.reactivated.Fprint.Error.PrintsNotDeletedFromDevice" =>
+        {
+            Ok(())
+        }
+        result => result,
+    };
+    let _ = device.call::<_, _, ()>("Release", &());
+    result
 }
 
 fn enroll(
@@ -274,59 +293,6 @@ fn enroll_claimed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    struct PasswordBackend {
-        prompt: bool,
-    }
-    impl AuthenticationBackend for PasswordBackend {
-        fn available(&self) -> bool {
-            true
-        }
-        fn unavailable_reason(&self) -> String {
-            String::new()
-        }
-        fn validate_account(&self) -> Result<(), String> {
-            Ok(())
-        }
-        fn authenticate(
-            &mut self,
-            _: &str,
-            conversation: &mut dyn FnMut(PromptStyle, &str) -> Option<SecureString>,
-            _: &dyn Fn() -> bool,
-        ) -> BackendResult {
-            if !self.prompt {
-                return BackendResult::Success;
-            }
-            if conversation(PromptStyle::EchoOff, "Password:")
-                .is_some_and(|secret| secret.as_bytes() == b"correct")
-            {
-                BackendResult::Success
-            } else {
-                BackendResult::Failure
-            }
-        }
-    }
-    #[test]
-    fn gate_requires_a_real_password_check_even_when_elevation_is_passwordless() {
-        let mut backend = PasswordBackend { prompt: false };
-        assert_eq!(
-            authenticate_password(&mut backend, "user", &SecureString::new(b"anything")),
-            BackendResult::Failure
-        );
-        backend.prompt = true;
-        assert_eq!(
-            authenticate_password(&mut backend, "user", &SecureString::new(b"wrong")),
-            BackendResult::Failure
-        );
-        assert_eq!(
-            authenticate_password(&mut backend, "user", &SecureString::new(b"correct")),
-            BackendResult::Success
-        );
-        assert_eq!(
-            authenticate_password(&mut backend, "user", &SecureString::new(b"")),
-            BackendResult::Failure
-        );
-    }
-
     struct EnrollmentDevice {
         stops: Arc<std::sync::atomic::AtomicUsize>,
         releases: Arc<std::sync::atomic::AtomicUsize>,
@@ -407,7 +373,6 @@ mod tests {
         sender
             .send(SettingsCommand {
                 value: json!({"command":"cancel"}),
-                pin: None,
             })
             .unwrap();
         enroll(&device, "test-user", "left-thumb", &receiver, deadline).unwrap();
@@ -419,8 +384,8 @@ mod tests {
 
     #[test]
     fn input_is_bounded_and_preserves_command_boundaries() {
-        let mut input = &b"password\n{\"command\":\"list\"}\n"[..];
-        assert_eq!(read_bounded_line(&mut input).unwrap().unwrap(), b"password");
+        let mut input = &b"482916\n{\"command\":\"list\"}\n"[..];
+        assert_eq!(read_bounded_line(&mut input).unwrap().unwrap(), b"482916");
         assert_eq!(
             read_bounded_line(&mut input).unwrap().unwrap(),
             b"{\"command\":\"list\"}"

@@ -7055,17 +7055,17 @@ abstract class AppLocalizations {
   /// **'Fingerprint'**
   String get fingerprintSection;
 
-  /// Fingerprint settings: fingerprintPasswordPrompt
+  /// Fingerprint settings: fingerprintPinPrompt
   ///
   /// In en, this message translates to:
-  /// **'Enter your sudo password to manage fingerprints.'**
-  String get fingerprintPasswordPrompt;
+  /// **'Enter your lock PIN to manage fingerprints.'**
+  String get fingerprintPinPrompt;
 
-  /// Fingerprint settings: fingerprintSudoPassword
+  /// Fingerprint settings: fingerprintPin
   ///
   /// In en, this message translates to:
-  /// **'Sudo password'**
-  String get fingerprintSudoPassword;
+  /// **'PIN'**
+  String get fingerprintPin;
 
   /// Fingerprint settings: fingerprintContinue
   ///
@@ -7109,16 +7109,16 @@ abstract class AppLocalizations {
   /// **'Add fingerprint'**
   String get fingerprintAdd;
 
-  /// Fingerprint settings: fingerprintAuthenticationFailed
+  /// Fingerprint settings: fingerprintPinNotSet
   ///
   /// In en, this message translates to:
-  /// **'Password verification failed. Try again.'**
-  String get fingerprintAuthenticationFailed;
+  /// **'Set a lock PIN first.'**
+  String get fingerprintPinNotSet;
 
   /// Fingerprint settings: fingerprintExpired
   ///
   /// In en, this message translates to:
-  /// **'Enter your password again to continue.'**
+  /// **'Enter your PIN again to continue.'**
   String get fingerprintExpired;
 
   /// Fingerprint settings: fingerprintPreparing

@@ -33,6 +33,12 @@ class _SettingsLockPinSectionState
   bool _requiresCurrentPin = false;
   String? _error;
 
+  /// A PIN in use is changed with itself alone; the account password sets
+  /// the first one, re-enables a removed one and removes it.
+  bool get _changing =>
+      _edit == _LockPinEdit.setUp &&
+      (ref.read(lockPinLengthProvider).value ?? 0) > 0;
+
   @override
   void dispose() {
     for (final controller in [_password, _pin, _confirm, _currentPin]) {
@@ -103,13 +109,15 @@ class _SettingsLockPinSectionState
     final service = ref.read(lockPinServiceProvider);
     final currentPin = _currentPin.text;
     _currentPin.clear();
-    final outcome = edit == _LockPinEdit.setUp
-        ? await service.save(
+    final outcome = edit == _LockPinEdit.remove
+        ? await service.clear(password: password)
+        : _changing
+        ? await service.change(currentPin: currentPin, pin: pin)
+        : await service.save(
             password: password,
             pin: pin,
             currentPin: currentPin,
-          )
-        : await service.clear(password: password);
+          );
     if (!mounted) {
       return;
     }
@@ -120,6 +128,7 @@ class _SettingsLockPinSectionState
         LockPinOutcome.saved || LockPinOutcome.cleared => null,
         LockPinOutcome.authenticationFailed =>
           l10n.settingsLockPinWrongPassword,
+        LockPinOutcome.wrongPin => l10n.lockWrongPin,
         LockPinOutcome.invalidPin => l10n.settingsLockPinLengthHint,
         LockPinOutcome.unavailable => l10n.settingsLockPinUnavailable,
       };
@@ -175,9 +184,11 @@ class _SettingsLockPinSectionState
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (_requiresCurrentPin && edit == _LockPinEdit.setUp)
+                if ((_requiresCurrentPin || _changing) &&
+                    edit == _LockPinEdit.setUp)
                   TextField(
                     controller: _currentPin,
+                    autofocus: _changing,
                     obscureText: true,
                     autocorrect: false,
                     enableSuggestions: false,
@@ -186,26 +197,27 @@ class _SettingsLockPinSectionState
                     maxLength: lockPinMaxLength,
                     decoration: InputDecoration(labelText: l10n.lockEnterPin),
                   ),
-                TextField(
-                  key: const ValueKey<String>('lock-pin-password'),
-                  controller: _password,
-                  obscureText: true,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  enabled: !_busy,
-                  autofocus: true,
-                  maxLength: 1024,
-                  decoration: InputDecoration(
-                    labelText: l10n.settingsLockPinPassword,
-                    counterText: '',
+                if (!_changing)
+                  TextField(
+                    key: const ValueKey<String>('lock-pin-password'),
+                    controller: _password,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    enabled: !_busy,
+                    autofocus: true,
+                    maxLength: 1024,
+                    decoration: InputDecoration(
+                      labelText: l10n.settingsLockPinPassword,
+                      counterText: '',
+                    ),
+                    textInputAction: edit == _LockPinEdit.setUp
+                        ? TextInputAction.next
+                        : TextInputAction.done,
+                    onSubmitted: edit == _LockPinEdit.setUp
+                        ? null
+                        : (_) => _submit(),
                   ),
-                  textInputAction: edit == _LockPinEdit.setUp
-                      ? TextInputAction.next
-                      : TextInputAction.done,
-                  onSubmitted: edit == _LockPinEdit.setUp
-                      ? null
-                      : (_) => _submit(),
-                ),
                 if (edit == _LockPinEdit.setUp) ...[
                   const SizedBox(height: 12),
                   _PinField(

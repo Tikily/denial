@@ -567,3 +567,22 @@ fn wrong_pin_fails_and_rate_limits_like_a_wrong_password() {
     assert!(result.state.cooldown_ms > 0);
     remove_pin_store(&store);
 }
+
+#[test]
+fn the_pin_check_confirms_only_the_pin() {
+    let store = temporary_pin_store("check");
+    let pin = |text: &str| SecureString::new(text.as_bytes());
+    assert_eq!(
+        pin::check_event(store.load().unwrap().as_ref(), &pin("482916")).unwrap()["event"],
+        "wrong-pin"
+    );
+    write_quick_record(&store, "482916");
+    let record = store.load().unwrap();
+    for (attempt, event) in [("482916", "confirmed"), ("482917", "wrong-pin"), ("4829", "wrong-pin")] {
+        assert_eq!(
+            pin::check_event(record.as_ref(), &pin(attempt)).unwrap()["event"],
+            event
+        );
+    }
+    remove_pin_store(&store);
+}

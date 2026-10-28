@@ -5360,13 +5360,13 @@
   "@fingerprintSection": {
     "description": "Fingerprint settings: fingerprintSection"
   },
-  "fingerprintPasswordPrompt": "Enter your sudo password to manage fingerprints.",
-  "@fingerprintPasswordPrompt": {
-    "description": "Fingerprint settings: fingerprintPasswordPrompt"
+  "fingerprintPinPrompt": "Enter your lock PIN to manage fingerprints.",
+  "@fingerprintPinPrompt": {
+    "description": "Fingerprint settings: fingerprintPinPrompt"
   },
-  "fingerprintSudoPassword": "Sudo password",
-  "@fingerprintSudoPassword": {
-    "description": "Fingerprint settings: fingerprintSudoPassword"
+  "fingerprintPin": "PIN",
+  "@fingerprintPin": {
+    "description": "Fingerprint settings: fingerprintPin"
   },
   "fingerprintContinue": "Continue",
   "@fingerprintContinue": {
@@ -5396,11 +5396,11 @@
   "@fingerprintAdd": {
     "description": "Fingerprint settings: fingerprintAdd"
   },
-  "fingerprintAuthenticationFailed": "Password verification failed. Try again.",
-  "@fingerprintAuthenticationFailed": {
-    "description": "Fingerprint settings: fingerprintAuthenticationFailed"
+  "fingerprintPinNotSet": "Set a lock PIN first.",
+  "@fingerprintPinNotSet": {
+    "description": "Fingerprint settings: fingerprintPinNotSet"
   },
-  "fingerprintExpired": "Enter your password again to continue.",
+  "fingerprintExpired": "Enter your PIN again to continue.",
   "@fingerprintExpired": {
     "description": "Fingerprint settings: fingerprintExpired"
   },
