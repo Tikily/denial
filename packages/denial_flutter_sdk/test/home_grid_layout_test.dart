@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:denial_flutter_sdk/applications.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -199,6 +201,89 @@ void main() {
         'app:a',
         'app:c',
       ]);
+    });
+  });
+
+  group('orientations', () {
+    test('a reflow keeps the order and fits every item in its page', () {
+      HomeGridLayout.columns = 6;
+      final slots = [
+        _item('a'),
+        null,
+        null,
+        null,
+        HomeGridItem.clock(colSpan: 4, rowSpan: 3),
+        null,
+        null,
+        null,
+        _item('b'),
+      ];
+      final next = HomeGridLayout.reflowSlots(slots, 18);
+      // The widget covers cells 1-4, 7-10 and 13-16 of the first page.
+      expect(_ids(next).take(6), [
+        'app:a',
+        'widget:clock',
+        null,
+        null,
+        null,
+        'app:b',
+      ]);
+      expect(next.skip(6), everyElement(isNull));
+      expect([next[1]!.colSpan, next[1]!.rowSpan], [4, 3]);
+    });
+
+    test('a reflow shrinks a widget taller than the page', () {
+      HomeGridLayout.columns = 6;
+      final next = HomeGridLayout.reflowSlots([
+        HomeGridItem.clock(colSpan: 2, rowSpan: 3),
+      ], 12);
+      expect([next[0]!.colSpan, next[0]!.rowSpan], [2, 2]);
+    });
+
+    test('each orientation saves its own layout', () async {
+      final home = await Directory.systemTemp.createTemp('home-layout');
+      addTearDown(() => home.delete(recursive: true));
+      final repository = HomeLayoutRepository(
+        paths: RuntimePaths(environment: {'HOME': home.path}),
+      );
+      final folder = HomeGridItem.folder(
+        id: 'folder:x',
+        name: 'Tools',
+        apps: [_item('a'), _item('b')],
+      );
+      await repository.saveLayouts(
+        HomeSavedLayouts(
+          layouts: {
+            HomeOrientation.portrait: [
+              HomeLayoutSlot.of(HomeGridItem.clock(rowSpan: 2)),
+              null,
+              HomeLayoutSlot.of(folder),
+            ],
+            HomeOrientation.landscape: [HomeLayoutSlot.of(_item('c'))],
+          },
+        ),
+      );
+
+      final saved = await repository.readSavedLayouts();
+      expect(saved.unassigned, isNull);
+      final portrait = saved.layouts[HomeOrientation.portrait]!;
+      expect([portrait[0]!.id, portrait[0]!.rowSpan], ['widget:clock', 2]);
+      expect(portrait[1], isNull);
+      expect(portrait[2]!.children, ['app:a', 'app:b']);
+      expect(saved.layouts[HomeOrientation.landscape]!.single!.id, 'app:c');
+    });
+
+    test('a layout from before orientations belongs to none yet', () async {
+      final home = await Directory.systemTemp.createTemp('home-layout');
+      addTearDown(() => home.delete(recursive: true));
+      final paths = RuntimePaths(environment: {'HOME': home.path});
+      await (await paths.layoutFile()).writeAsString(
+        '{"version": 3, "slots": ["app:a", null]}',
+      );
+
+      final saved = await HomeLayoutRepository(paths: paths).readSavedLayouts();
+      expect(saved.layouts, isEmpty);
+      expect([for (final slot in saved.unassigned!) slot?.id], ['app:a', null]);
     });
   });
 

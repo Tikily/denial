@@ -36,6 +36,7 @@ class HomeGridGeometry {
     required this.rows,
     required this.tileSize,
     required this.inset,
+    this.orientation = HomeOrientation.portrait,
     this.gap = HomeGridLayout.gridGap,
   });
 
@@ -47,16 +48,29 @@ class HomeGridGeometry {
     const gap = HomeGridLayout.gridGap;
     final tileWidth = (width - gap * (columns - 1)) / columns;
     // Cell content is fixed-size, so height must not follow width past its
-    // cap (phone tiles never reach it and keep the tuned aspect).
-    final tileHeight = math.min(
-      tileWidth / HomeTileMetrics.cellAspectRatio,
-      HomeGridLayout.maxTileHeight,
+    // cap (phone tiles never reach it and keep the tuned aspect). A short
+    // panel shrinks cells until its rows fit, down to the icon and label.
+    final fittingHeight =
+        (size.height - gap * (HomeGridLayout.minRows - 1)) /
+        HomeGridLayout.minRows;
+    final tileHeight = math.max(
+      HomeGridLayout.minTileHeight,
+      math.min(
+        math.min(
+          tileWidth / HomeTileMetrics.cellAspectRatio,
+          HomeGridLayout.maxTileHeight,
+        ),
+        fittingHeight,
+      ),
     );
     return HomeGridGeometry(
       columns: columns,
       rows: HomeGridLayout.rowsForHeight(size.height, tileHeight),
       tileSize: Size(tileWidth, tileHeight),
       inset: inset,
+      orientation: size.width > size.height
+          ? HomeOrientation.landscape
+          : HomeOrientation.portrait,
     );
   }
 
@@ -66,6 +80,9 @@ class HomeGridGeometry {
 
   /// Horizontal margin between the viewport and the first column.
   final double inset;
+
+  /// Which of its layouts the grid shows.
+  final HomeOrientation orientation;
   final double gap;
 
   int get pageSize => columns * rows;
@@ -107,8 +124,10 @@ class HomeGridGeometry {
       other.rows == rows &&
       other.tileSize == tileSize &&
       other.inset == inset &&
+      other.orientation == orientation &&
       other.gap == gap;
 
   @override
-  int get hashCode => Object.hash(columns, rows, tileSize, inset, gap);
+  int get hashCode =>
+      Object.hash(columns, rows, tileSize, inset, orientation, gap);
 }

@@ -3,6 +3,10 @@ import 'desktop_app.dart';
 
 enum HomeGridItemType { clock, app, folder }
 
+/// Home keeps one layout for each orientation, so arranging one never
+/// rearranges the other.
+enum HomeOrientation { portrait, landscape }
+
 /// One saved grid slot. A folder lists its applications in [children].
 class HomeLayoutSlot {
   const HomeLayoutSlot({
@@ -12,6 +16,21 @@ class HomeLayoutSlot {
     this.name,
     this.children,
   });
+
+  /// The saved form of [item].
+  factory HomeLayoutSlot.of(HomeGridItem item) => switch (item.type) {
+    HomeGridItemType.app => HomeLayoutSlot(id: item.id),
+    HomeGridItemType.clock => HomeLayoutSlot(
+      id: item.id,
+      colSpan: item.colSpan,
+      rowSpan: item.rowSpan,
+    ),
+    HomeGridItemType.folder => HomeLayoutSlot(
+      id: item.id,
+      name: item.folderName,
+      children: [for (final app in item.folderApps) app.id],
+    ),
+  };
 
   final String id;
   final int? colSpan;

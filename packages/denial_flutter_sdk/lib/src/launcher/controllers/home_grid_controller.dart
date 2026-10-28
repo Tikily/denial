@@ -81,6 +81,13 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
   bool _launcherActive = true;
   int _buildGeneration = 0;
 
+  /// The orientation the slots are laid out for; null while they belong to
+  /// whichever orientation the grid shows first.
+  HomeOrientation? _orientation;
+
+  /// Every orientation's saved layout, the shown one as of its last save.
+  Map<HomeOrientation, List<HomeLayoutSlot?>> _layouts = {};
+
   @override
   Future<HomeGridState> build() async {
     final generation = ++_buildGeneration;
@@ -115,7 +122,14 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
         .toList(growable: false);
     try {
       final apps = await _loadApplications(appsRepository, reason: 'initial');
-      final savedLayout = await layoutRepository.readSavedLayout();
+      final saved = await layoutRepository.readSavedLayouts();
+      // Portrait first, which is where a phone starts.
+      final orientation = HomeOrientation.values
+          .where(saved.layouts.containsKey)
+          .firstOrNull;
+      final savedLayout = orientation == null
+          ? saved.unassigned
+          : saved.layouts[orientation];
       final slots = HomeGridLayout.initialSlotsForApps(
         apps,
         localApps,
@@ -124,9 +138,11 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
       if (!_isBuildActive(generation)) {
         return HomeGridState(slots: slots);
       }
+      _orientation = orientation;
+      _layouts = {...saved.layouts};
       _lastDesktopRefresh = DateTime.now();
       if (_savedLayoutNeedsRefresh(apps, localApps, savedLayout, slots)) {
-        unawaited(layoutRepository.saveLayout(slots));
+        _save(slots);
       }
       unawaited(_startDesktopRefreshTriggers(generation, appsRepository));
       return HomeGridState(slots: slots);
@@ -206,7 +222,7 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
         localApps,
       );
       state = AsyncData(current.copyWith(slots: slots));
-      unawaited(ref.read(homeLayoutRepositoryProvider).saveLayout(slots));
+      _save(slots);
     } finally {
       if (_isBuildActive(generation)) {
         _desktopRefreshInFlight = false;
@@ -297,6 +313,37 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
       repository.loadApplications,
       debugName: 'denia-launcher-desktop-$reason',
     );
+  }
+
+  /// The orientation the grid shows, null before it first lays out.
+  HomeOrientation? get orientation => _orientation;
+
+  /// Lays the grid out for [orientation], in pages of [pageSize]: its saved
+  /// layout, or the shown one reflowed into the new pages when it has none.
+  void arrange(HomeOrientation orientation, int pageSize) {
+    final current = state.asData?.value;
+    final shown = _orientation;
+    if (current == null || orientation == shown) {
+      return;
+    }
+    _orientation = orientation;
+    if (shown == null) {
+      // The slots are this orientation's layout from now on.
+      _save(current.slots);
+      return;
+    }
+
+    _layouts[shown] = _layoutOf(current.slots);
+    final saved = _layouts[orientation];
+    final slots = saved == null
+        ? HomeGridLayout.reflowSlots(current.slots, pageSize)
+        : HomeGridLayout.initialSlotsForApps(
+            [for (final item in current.apps) ?item.app],
+            ref.read(localFlutterApplicationRegistryProvider).applications,
+            saved,
+          );
+    state = AsyncData(current.copyWith(slots: slots));
+    _save(slots);
   }
 
   void setPage(int page) {
@@ -436,9 +483,31 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
       return;
     }
     state = AsyncData(current.copyWith(slots: slots));
-    unawaited(ref.read(homeLayoutRepositoryProvider).saveLayout(slots));
+    _save(slots);
+  }
+
+  /// Saves [slots] as the shown orientation's layout, beside the others.
+  void _save(List<HomeGridItem?> slots) {
+    final layout = _layoutOf(slots);
+    final orientation = _orientation;
+    if (orientation != null) {
+      _layouts[orientation] = layout;
+    }
+    unawaited(
+      ref
+          .read(homeLayoutRepositoryProvider)
+          .saveLayouts(
+            orientation == null
+                ? HomeSavedLayouts(unassigned: layout)
+                : HomeSavedLayouts(layouts: {..._layouts}),
+          ),
+    );
   }
 }
+
+List<HomeLayoutSlot?> _layoutOf(List<HomeGridItem?> slots) => [
+  for (final slot in slots) slot == null ? null : HomeLayoutSlot.of(slot),
+];
 
 Map<String, DesktopApp> _appsByGridId(Iterable<HomeGridItem> items) {
   return <String, DesktopApp>{for (final item in items) item.id: ?item.app};

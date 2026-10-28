@@ -329,6 +329,14 @@ class _HomeSurfaceState extends ConsumerState<HomeSurface>
     _geometry = geometry;
     final grid = this.grid;
     if (grid == null || drag.active) return;
+    if (geometry.orientation != gridController.orientation) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          gridController.arrange(geometry.orientation, geometry.pageSize);
+        }
+      });
+      return;
+    }
     final last =
         HomeGridLayout.pageCountForSlots(grid.slots, geometry.pageSize) - 1;
     if (grid.page > last) {

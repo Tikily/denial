@@ -29,17 +29,23 @@ class HomeGridLayout {
   static const double maxTileWidth = 224;
   static const double maxTileHeight = 240;
 
+  /// A cell never gets shorter than its icon and label.
+  static const double minTileHeight = 131;
+  static const int minRows = 3;
+  static const int maxRows = 7;
+
   /// Column count so tiles stay at or under [maxTileWidth].
   static int columnsForViewport(double width) {
     final cols = ((width + gridGap) / (maxTileWidth + gridGap)).ceil();
     return cols.clamp(4, 14).toInt();
   }
 
+  /// The rows of [tileHeight] that fit in [height]: never more than fit,
+  /// and at least one.
   static int rowsForHeight(double height, double tileHeight) {
-    const minRows = 3;
-    const maxRows = 7;
-    final rows = ((height + gridGap) / (tileHeight + gridGap)).floor();
-    return rows.clamp(minRows, maxRows).toInt();
+    // Cells sized to fill the height exactly must not lose a row to rounding.
+    final rows = ((height + gridGap) / (tileHeight + gridGap) + 1e-6).floor();
+    return rows.clamp(1, maxRows).toInt();
   }
 
   static int pageCountForSlots(List<HomeGridItem?> slots, int pageSize) {
@@ -185,6 +191,38 @@ class HomeGridLayout {
       1 => apps.single,
       _ => HomeGridItem.folder(id: id, name: name, apps: apps),
     };
+  }
+
+  /// [slots] placed one after another, in order, into the current columns
+  /// and pages of [pageSize]: the first layout of an orientation, from the
+  /// other's. A widget taller or wider than a page shrinks to fit it.
+  static List<HomeGridItem?> reflowSlots(
+    List<HomeGridItem?> slots,
+    int pageSize,
+  ) {
+    final rows = math.max(1, pageSize ~/ columns);
+    var next = <HomeGridItem?>[];
+    var index = 0;
+    for (final slot in slots) {
+      if (slot == null) continue;
+      final item = slot.resize(
+        colSpan: math.min(slot.colSpan, columns),
+        rowSpan: math.min(slot.rowSpan, rows),
+      );
+      while (!canPlaceAt(
+        next,
+        index,
+        item,
+        pageSize,
+        ignoreAnchors: const {},
+      )) {
+        index += 1;
+      }
+      next = ensureListLength(next, cellsFor(index, item).last + 1);
+      next[index] = item;
+      index += 1;
+    }
+    return next;
   }
 
   // Placement ----------------------------------------------------------------
