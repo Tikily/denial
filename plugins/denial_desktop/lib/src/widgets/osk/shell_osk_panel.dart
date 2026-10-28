@@ -865,10 +865,11 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
         final maxRowHeight = rows.length <= 4
             ? (compact ? 78.0 : 88.0)
             : (compact ? 70.0 : 76.0);
+        // Rows always fit the panel, however short a landscape view makes it.
         final rowHeight =
             ((size.height - padding.vertical - rowGap * (rows.length - 1)) /
                     (rows.length + (rows.length - 1) * (_tallRow - 1)))
-                .clamp(48.0, maxRowHeight)
+                .clamp(0.0, maxRowHeight)
                 .toDouble();
         final geometry = _geometry = _OskGeometry.layout(
           rows,

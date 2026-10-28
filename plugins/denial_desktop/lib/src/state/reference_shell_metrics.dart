@@ -62,8 +62,10 @@ class ReferenceShellMetrics {
     if (viewSize.height <= 0.0) {
       return 0.0;
     }
-    // The keys take 30% of the view; the suggestion strip adds to that.
-    final keys = (viewSize.height * 0.30).clamp(0.0, edgePanelKeysMaxHeight);
+    // The keys take 30% of the view, 40% of a landscape one; the suggestion
+    // strip adds to that.
+    final share = viewSize.width > viewSize.height ? 0.40 : 0.30;
+    final keys = (viewSize.height * share).clamp(0.0, edgePanelKeysMaxHeight);
     return (keys + oskSuggestionStripHeight)
         .clamp(0.0, viewSize.height)
         .toDouble();
