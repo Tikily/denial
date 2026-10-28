@@ -386,7 +386,7 @@
   "quickSettingsSilent": "静音",
   "settingsAboutArchitecture": "Flutter 不是覆盖在另一个合成器之上的界面，而是合成器基础的一部分。",
   "settingsAboutBelief": "起源不必决定用途。",
-  "settingsAboutCollaboration": "与 OpenAI Codex 持续协作构建。",
+  "settingsAboutCollaboration": "与 AI 模型（主要是 Sol 6.1 和 Opus 5.5）持续协作构建。",
   "settingsAboutCreditLabel": "构思、指导与测试",
   "settingsAboutCreditName": "Doctor Logix",
   "settingsAboutDescription": "Denial 赋予 Flutter 不同的生命。它掌管桌面场景本身：Shell、动效以及 Wayland 应用的合成。",

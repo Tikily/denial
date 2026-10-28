@@ -1358,7 +1358,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsAboutCollaboration =>
-      'Built in continuous collaboration with OpenAI Codex.';
+      'Built in continuous collaboration with AI models, mostly Sol 6.1 and Opus 5.5.';
 
   @override
   String get settingsAboutCreditLabel => 'CONCEIVED, DIRECTED & TESTED BY';

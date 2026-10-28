@@ -2421,7 +2421,7 @@ abstract class AppLocalizations {
   /// Collaboration credit on the Settings About page.
   ///
   /// In en, this message translates to:
-  /// **'Built in continuous collaboration with OpenAI Codex.'**
+  /// **'Built in continuous collaboration with AI models, mostly Sol 6.1 and Opus 5.5.'**
   String get settingsAboutCollaboration;
 
   /// Uppercase label above the creator's name on the Settings About page.

@@ -1312,7 +1312,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsAboutBelief => '起源不必决定用途。';
 
   @override
-  String get settingsAboutCollaboration => '与 OpenAI Codex 持续协作构建。';
+  String get settingsAboutCollaboration =>
+      '与 AI 模型（主要是 Sol 6.1 和 Opus 5.5）持续协作构建。';
 
   @override
   String get settingsAboutCreditLabel => '构思、指导与测试';

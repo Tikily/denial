@@ -1927,7 +1927,7 @@
   "@settingsAboutBelief": {
     "description": "Denial's founding belief, shown prominently on the Settings About page."
   },
-  "settingsAboutCollaboration": "Built in continuous collaboration with OpenAI Codex.",
+  "settingsAboutCollaboration": "Built in continuous collaboration with AI models, mostly Sol 6.1 and Opus 5.5.",
   "@settingsAboutCollaboration": {
     "description": "Collaboration credit on the Settings About page."
   },
