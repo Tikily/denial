@@ -204,7 +204,7 @@ fn cancelled(shared: &SharedAuthentication, epoch: u64) -> bool {
     state.stopping
         || state.lock_epoch != epoch
         || !state.fingerprint_offered
-        || !state.fingerprint_enabled
+        || !state.fingerprint_allowed()
         || !shared.locked.load(Ordering::Acquire)
 }
 
@@ -222,7 +222,7 @@ pub(super) fn run_worker(
                 && (!shared.locked.load(Ordering::Acquire)
                     || state.fingerprint_unlock.is_some()
                     || !state.fingerprint_offered
-                    || !state.fingerprint_enabled)
+                    || !state.fingerprint_allowed())
             {
                 state = shared
                     .condition

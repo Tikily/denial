@@ -323,6 +323,39 @@ DENIAL_FPRINT_TEST_BUS=1 dbus-run-session -- \
   cargo test --locked --features flutter --bin deniald authentication::
 ```
 
+## NX809J native PIN authorization
+
+On NX809J, `deniald --lock-pin` uses the socket-activated
+`goodix-gatekeeper-worker` through `/run/nx809j-gatekeeper/worker.sock`.
+The socket is owned by the configured session account and mode 0600; the
+service runs one root worker per connection. Denial checks the server's root
+peer credentials. Install the worker and the device's `nx809j-gatekeeper.socket`
+and `nx809j-gatekeeper@.service` units before enabling the socket.
+
+The user's existing lock-PIN state file stores a version-2 record containing
+PIN length, enabled state, native namespace 941003, returned secure user ID and
+opaque handle. PIN bytes and HATs are never stored in that record. Changes use
+the current PIN and preserve the SID; credential changes are serialized and
+records are replaced atomically with fsync. Native checks fail when the provider
+fails. Disabling PIN unlock keeps the handle for authenticated re-enablement;
+a missing/corrupt handle requires explicit recovery, not automatic enrollment.
+
+Fingerprint settings continues using fprintd's standard `EnrollStart`. Its
+privileged session accepts the entered PIN on a separate private input line,
+then creates a root-only one-enrollment broker before calling `EnrollStart`.
+The native sensor worker submits its fresh challenge directly to that broker.
+The broker asks Gatekeeper to verify the PIN for the challenge and returns the
+69-byte signed HAT to the same sensor session. The worker consumes it internally,
+so the libfprint helper sees the normal prepared/capture/progress records.
+There is no PIN/HAT argument added to fprintd, and the broker does not publish
+a reusable authorization ticket. Cancellation and completion remove the broker;
+trusted PIN rejection and retry delays are reported separately.
+
+This code is host-tested and cross-compiled. Real PIN provisioning, signed-token
+acceptance and complete NX809J enrollment/matching still need hardware
+validation and the NX809J libfprint/helper adapter. No deployment or credential
+provisioning is performed by the build.
+
 ## Renderer selection
 
 Denial engines are Slimpeller builds: deniald always runs Flutter on Impeller

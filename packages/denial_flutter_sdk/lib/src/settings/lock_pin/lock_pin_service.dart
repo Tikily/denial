@@ -39,20 +39,28 @@ final lockPinServiceProvider = Provider<LockPinService>(
 class LockPinService {
   const LockPinService();
 
-  static const Duration _timeout = Duration(seconds: 20);
+  static const Duration _timeout = Duration(seconds: 40);
 
   Future<int> length() async {
     final reply = await _run(const ['status']);
     return reply?['event'] == 'status' ? (reply!['length'] as int? ?? 0) : 0;
   }
 
+  /// A disabled native PIN retains its credential and still needs the current
+  /// PIN for a change. This does not mean PIN unlock is currently enabled.
+  Future<bool> requiresCurrentPin() async {
+    final reply = await _run(const ['status']);
+    return reply?['requires_current_pin'] == true;
+  }
+
   Future<LockPinOutcome> save({
     required String password,
     required String pin,
+    String? currentPin,
   }) async {
     if (!_validPassword(password)) return LockPinOutcome.authenticationFailed;
     if (!isValidLockPin(pin)) return LockPinOutcome.invalidPin;
-    return _outcome(await _run(['set', password, pin]));
+    return _outcome(await _run(['set', password, pin, ?currentPin]));
   }
 
   Future<LockPinOutcome> clear({required String password}) async {
@@ -69,7 +77,8 @@ class LockPinService {
       switch (reply?['event']) {
         'saved' => LockPinOutcome.saved,
         'cleared' => LockPinOutcome.cleared,
-        'authentication-failed' => LockPinOutcome.authenticationFailed,
+        'authentication-failed' ||
+        'wrong-pin' => LockPinOutcome.authenticationFailed,
         'invalid-pin' => LockPinOutcome.invalidPin,
         _ => LockPinOutcome.unavailable,
       };

@@ -6,6 +6,8 @@ mod fingerprint;
 pub(super) mod fingerprint_settings;
 #[path = "authentication/lock_capability.rs"]
 mod lock_capability;
+#[path = "authentication/gatekeeper.rs"]
+mod gatekeeper;
 #[path = "authentication/pin.rs"]
 pub(super) mod pin;
 #[path = "authentication/session_lock.rs"]
@@ -863,6 +865,13 @@ struct AuthenticationState {
     automatic_lock_warning_shown: bool,
 }
 
+impl AuthenticationState {
+    /// Fingerprints unlock only behind a PIN: the switch alone is not enough.
+    fn fingerprint_allowed(&self) -> bool {
+        self.fingerprint_enabled && self.pin_length > 0
+    }
+}
+
 struct SharedAuthentication {
     haptics: std::sync::OnceLock<crate::haptics::HapticsClient>,
     locked: AtomicBool,
@@ -1499,6 +1508,9 @@ fn load_pin(
     if state.pin_length != pin_length {
         state.pin_length = pin_length;
         shared.push_event(credential_event(shared, &state));
+        drop(state);
+        // The fingerprint worker follows whether a PIN exists.
+        shared.notify();
     }
     record
 }
@@ -1509,7 +1521,7 @@ fn credential_event(
     shared: &SharedAuthentication,
     state: &AuthenticationState,
 ) -> AuthenticationEvent {
-    let message = if state.fingerprint_known && state.fingerprint_enabled {
+    let message = if state.fingerprint_known && state.fingerprint_allowed() {
         let sensor = state.fingerprint_sensor.map_or_else(
             || serde_json::json!({}),
             |[x, y, width, height]| {

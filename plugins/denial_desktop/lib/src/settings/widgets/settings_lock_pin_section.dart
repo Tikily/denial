@@ -26,25 +26,37 @@ class _SettingsLockPinSectionState
     extends ConsumerState<SettingsLockPinSection> {
   final _password = TextEditingController();
   final _pin = TextEditingController();
+  final _currentPin = TextEditingController();
   final _confirm = TextEditingController();
   _LockPinEdit? _edit;
   bool _busy = false;
+  bool _requiresCurrentPin = false;
   String? _error;
 
   @override
   void dispose() {
-    for (final controller in [_password, _pin, _confirm]) {
+    for (final controller in [_password, _pin, _confirm, _currentPin]) {
       controller.clear();
       controller.dispose();
     }
     super.dispose();
   }
 
-  void _open(_LockPinEdit edit) {
+  Future<void> _open(_LockPinEdit edit) async {
     _clearFields();
     setState(() {
       _edit = edit;
       _error = null;
+      _busy = true;
+      _requiresCurrentPin = false;
+    });
+    final required = await ref
+        .read(lockPinServiceProvider)
+        .requiresCurrentPin();
+    if (!mounted || _edit != edit) return;
+    setState(() {
+      _requiresCurrentPin = required;
+      _busy = false;
     });
   }
 
@@ -53,12 +65,15 @@ class _SettingsLockPinSectionState
     setState(() {
       _edit = null;
       _error = null;
+      _busy = false;
+      _requiresCurrentPin = false;
     });
   }
 
   void _clearFields() {
     _password.clear();
     _pin.clear();
+    _currentPin.clear();
     _confirm.clear();
   }
 
@@ -86,8 +101,14 @@ class _SettingsLockPinSectionState
       _error = null;
     });
     final service = ref.read(lockPinServiceProvider);
+    final currentPin = _currentPin.text;
+    _currentPin.clear();
     final outcome = edit == _LockPinEdit.setUp
-        ? await service.save(password: password, pin: pin)
+        ? await service.save(
+            password: password,
+            pin: pin,
+            currentPin: currentPin,
+          )
         : await service.clear(password: password);
     if (!mounted) {
       return;
@@ -154,6 +175,17 @@ class _SettingsLockPinSectionState
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (_requiresCurrentPin && edit == _LockPinEdit.setUp)
+                  TextField(
+                    controller: _currentPin,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    maxLength: lockPinMaxLength,
+                    decoration: InputDecoration(labelText: l10n.lockEnterPin),
+                  ),
                 TextField(
                   key: const ValueKey<String>('lock-pin-password'),
                   controller: _password,

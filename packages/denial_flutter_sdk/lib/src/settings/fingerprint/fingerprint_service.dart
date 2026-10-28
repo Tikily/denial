@@ -70,6 +70,8 @@ class FingerprintSettingsSession extends ChangeNotifier {
   bool authorized = false;
   bool authenticating = false;
   bool enrolling = false;
+  bool pinRequired = false;
+  int retryMilliseconds = 0;
   List<String> fingers = const [];
   String? status;
   int completed = 0;
@@ -185,6 +187,7 @@ class FingerprintSettingsSession extends ChangeNotifier {
         _authenticationTimeout?.cancel();
         authenticating = false;
         authorized = true;
+        pinRequired = event['pin_required'] == true;
         enrolling = false;
         fingers = List.unmodifiable(
           (event['fingers'] as List).whereType<String>().where(
@@ -217,6 +220,10 @@ class FingerprintSettingsSession extends ChangeNotifier {
       case 'error':
         if (!authorized) return;
         status = event['code'] as String? ?? 'unavailable';
+        retryMilliseconds = (event['retry_ms'] as int? ?? 0).clamp(
+          0,
+          2147483647,
+        );
         enrolling = false;
       default:
         return;
@@ -224,11 +231,17 @@ class FingerprintSettingsSession extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  void enroll(String finger) {
+  void enroll(String finger, {String? pin}) {
     if (!authorized ||
         enrolling ||
         !fingerprintNames.contains(finger) ||
         fingers.contains(finger)) {
+      return;
+    }
+    if (pinRequired &&
+        (pin == null || !RegExp(r'^[0-9]{4,12}$').hasMatch(pin))) {
+      status = 'pin-required';
+      notifyListeners();
       return;
     }
     enrolling = true;
@@ -236,8 +249,13 @@ class FingerprintSettingsSession extends ChangeNotifier {
     total = 1;
     status = 'preparing';
     _process?.stdin.writeln(
-      jsonEncode({'command': 'enroll', 'finger': finger}),
+      jsonEncode({
+        'command': 'enroll',
+        'finger': finger,
+        if (pinRequired) 'native_pin': true,
+      }),
     );
+    if (pinRequired) _process?.stdin.writeln(pin!);
     notifyListeners();
   }
 
@@ -258,6 +276,7 @@ class FingerprintSettingsSession extends ChangeNotifier {
       _stopProcess(process);
     }
     authorized = false;
+    pinRequired = false;
     authenticating = false;
     enrolling = false;
     fingers = const [];

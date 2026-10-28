@@ -2,15 +2,44 @@ use super::*;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc;
 
+/// A controller whose account has a PIN, which fingerprint unlock needs;
+/// its first credential event is already taken.
 fn controller(locked: bool) -> AuthenticationController {
+    static STORE: std::sync::OnceLock<pin::PinStore> = std::sync::OnceLock::new();
+    let store = STORE.get_or_init(|| {
+        let store = super::super::tests::temporary_pin_store("fingerprint");
+        super::super::tests::write_quick_record(&store, "482916");
+        store
+    });
+    let controller = controller_with(Some(store.clone()), locked);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while lock_unpoisoned(&controller.shared.state).pin_length == 0 {
+        assert!(Instant::now() < deadline, "the PIN record was not read");
+        thread::sleep(Duration::from_millis(1));
+    }
+    while controller.try_event().is_some() {}
+    controller
+}
+
+fn controller_with(pin_store: Option<pin::PinStore>, locked: bool) -> AuthenticationController {
     AuthenticationController::with_backend(
         Box::new(UnavailableBackend {
             reason: "test".into(),
         }),
-        None,
+        pin_store,
         locked,
     )
     .unwrap()
+}
+
+#[test]
+fn without_a_pin_the_reader_stays_off() {
+    let controller = controller_with(None, true);
+    publish_readiness(&controller.shared, true);
+    while let Some(event) = controller.try_event() {
+        assert!(event.message.is_empty());
+    }
+    assert!(cancelled(&controller.shared, 0));
 }
 
 #[test]
@@ -282,7 +311,7 @@ fn armed_reader_is_announced_once_and_stays_marked_between_scans() {
     let event = controller.try_event().expect("readiness event");
     assert!(matches!(
         event.kind,
-        AuthenticationEventKind::Credential { pin_length: 0 }
+        AuthenticationEventKind::Credential { pin_length: 6 }
     ));
     assert!(event.message.starts_with(r#"{"fingerprint":"#));
     assert!(event.message.contains(r#""ready":true"#));

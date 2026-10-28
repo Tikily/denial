@@ -23,6 +23,11 @@ const FINGERS: [&str; 10] = [
     "right-little-finger",
 ];
 
+struct SettingsCommand {
+    value: Value,
+    pin: Option<SecureString>,
+}
+
 fn emit(value: Value) -> io::Result<()> {
     let mut output = io::stdout().lock();
     serde_json::to_writer(&mut output, &value)?;
@@ -90,20 +95,35 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
             let Ok(value) = serde_json::from_slice::<Value>(&line) else {
                 break;
             };
-            if commands.send(value).is_err() {
+            // The PIN occupies its own private line, never a JSON object/log.
+            let pin = if value.get("native_pin").and_then(Value::as_bool) == Some(true) {
+                let Ok(Some(mut bytes)) = read_bounded_line(&mut input) else {
+                    break;
+                };
+                let pin = SecureString::new(&bytes);
+                erase_bytes(&mut bytes);
+                Some(pin)
+            } else {
+                None
+            };
+            if commands.send(SettingsCommand { value, pin }).is_err() {
                 break;
             }
         }
     });
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
-        let command = match receiver.recv_timeout(remaining) {
+        let mut command = match receiver.recv_timeout(remaining) {
             Ok(command) => command,
             Err(_) => break,
         };
-        match command.get("command").and_then(Value::as_str) {
+        match command.value.get("command").and_then(Value::as_str) {
             Some("list") => publish_fingers(&device, &username)?,
             Some("enroll") => {
-                let finger = command.get("finger").and_then(Value::as_str).unwrap_or("");
+                let finger = command
+                    .value
+                    .get("finger")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 if !FINGERS.contains(&finger) {
                     emit(json!({"event":"error","code":"invalid-finger"}))?;
                     continue;
@@ -115,11 +135,43 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
                     emit(json!({"event":"error","code":"already-enrolled"}))?;
                     continue;
                 }
+                let authorization = if gatekeeper::enabled() {
+                    let Some(pin) = command.pin.take().filter(|p| pin::valid_pin(p.as_bytes()))
+                    else {
+                        emit(json!({"event":"error","code":"pin-required"}))?;
+                        continue;
+                    };
+                    let store = pin::PinStore::for_uid(uid)
+                        .ok_or("native credential storage unavailable")?;
+                    let credential = match store.enrollment_credential() {
+                        Ok(credential) => credential,
+                        Err(_) => {
+                            emit(json!({"event":"error","code":"pin-not-configured"}))?;
+                            continue;
+                        }
+                    };
+                    Some(gatekeeper::Authorization::start(credential, pin)?)
+                } else {
+                    None
+                };
                 if let Err(error) = enroll(&device, &username, finger, &receiver, deadline) {
                     // Only a fixed error code reaches the UI; details stay on stderr.
                     eprintln!("fingerprint enrollment: {error}");
                     emit(json!({"event":"error","code":"enrollment-failed"}))?;
                 }
+                if let Some(error) = authorization
+                    .as_ref()
+                    .and_then(gatekeeper::Authorization::error)
+                {
+                    eprintln!("fingerprint authorization: {error}");
+                    let (code, retry_ms) = match error {
+                        gatekeeper::Failure::Rejected => ("wrong-pin", 0),
+                        gatekeeper::Failure::Throttled(ms) => ("rate-limited", ms),
+                        _ => ("pin-authorization-failed", 0),
+                    };
+                    emit(json!({"event":"error","code":code,"retry_ms":retry_ms}))?;
+                }
+                drop(authorization);
                 publish_fingers(&device, &username)?;
             }
             Some("cancel") => {}
@@ -143,7 +195,7 @@ fn list_fingers(device: &Proxy<'_>, username: &str) -> zbus::Result<Vec<String>>
 
 fn publish_fingers(device: &Proxy<'_>, username: &str) -> Result<(), Box<dyn Error>> {
     let fingers = list_fingers(device, username)?;
-    emit(json!({"event":"ready","fingers":fingers}))?;
+    emit(json!({"event":"ready","fingers":fingers,"pin_required":gatekeeper::enabled()}))?;
     Ok(())
 }
 
@@ -151,7 +203,7 @@ fn enroll(
     device: &Proxy<'_>,
     username: &str,
     finger: &str,
-    commands: &mpsc::Receiver<Value>,
+    commands: &mpsc::Receiver<SettingsCommand>,
     session_deadline: Instant,
 ) -> Result<(), Box<dyn Error>> {
     device.call::<_, _, ()>("Claim", &(username,))?;
@@ -164,7 +216,7 @@ fn enroll(
 fn enroll_claimed(
     device: &Proxy<'_>,
     finger: &str,
-    commands: &mpsc::Receiver<Value>,
+    commands: &mpsc::Receiver<SettingsCommand>,
     session_deadline: Instant,
 ) -> Result<(), Box<dyn Error>> {
     let mut statuses = future::block_on(device.inner().receive_signal("EnrollStatus"))?;
@@ -352,7 +404,12 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(2);
         enroll(&device, "test-user", "left-thumb", &receiver, deadline).unwrap();
         *lock_unpoisoned(&mode) = "silent".into();
-        sender.send(json!({"command":"cancel"})).unwrap();
+        sender
+            .send(SettingsCommand {
+                value: json!({"command":"cancel"}),
+                pin: None,
+            })
+            .unwrap();
         enroll(&device, "test-user", "left-thumb", &receiver, deadline).unwrap();
         *lock_unpoisoned(&mode) = "error".into();
         assert!(enroll(&device, "test-user", "left-thumb", &receiver, deadline).is_err());

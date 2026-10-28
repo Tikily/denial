@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:denial_flutter_sdk/materials.dart';
 
 import 'dart:math' as math;
@@ -21,6 +22,7 @@ class SettingsFingerprintPage extends ConsumerStatefulWidget {
 class _SettingsFingerprintPageState
     extends ConsumerState<SettingsFingerprintPage> {
   final _password = TextEditingController();
+  final _pin = TextEditingController();
   String? _selected;
   bool _adding = false;
 
@@ -28,6 +30,8 @@ class _SettingsFingerprintPageState
   void dispose() {
     _password.clear();
     _password.dispose();
+    _pin.clear();
+    _pin.dispose();
     super.dispose();
   }
 
@@ -46,7 +50,11 @@ class _SettingsFingerprintPageState
         final l10n = context.l10n;
         final status = session.status;
         final error = status != null && _isFingerprintError(status)
-            ? _status(context, status)
+            ? _status(
+                context,
+                status,
+                retryMilliseconds: session.retryMilliseconds,
+              )
             : null;
         if (!session.authorized) {
           // This branch contains no fingerprint names, counts or enrollment UI.
@@ -187,12 +195,25 @@ class _SettingsFingerprintPageState
                   ],
                   onChanged: (finger) => setState(() => _selected = finger),
                 ),
+                if (session.pinRequired)
+                  TextField(
+                    controller: _pin,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    maxLength: lockPinMaxLength,
+                    decoration: InputDecoration(labelText: l10n.lockEnterPin),
+                  ),
                 FilledButton.icon(
                   onPressed: _selected == null
                       ? null
                       : () {
                           setState(() => _adding = false);
-                          session.enroll(_selected!);
+                          final pin = _pin.text;
+                          _pin.clear();
+                          session.enroll(_selected!, pin: pin);
                         },
                   icon: const Icon(Icons.fingerprint_rounded),
                   label: Text(l10n.fingerprintEnroll),
@@ -228,10 +249,19 @@ String fingerprintLabel(BuildContext context, String finger) {
   };
 }
 
-String _status(BuildContext context, String status) {
+String _status(
+  BuildContext context,
+  String status, {
+  int retryMilliseconds = 0,
+}) {
   final l10n = context.l10n;
   return switch (status) {
     'authentication-failed' => l10n.fingerprintAuthenticationFailed,
+    'pin-required' => l10n.lockEnterPin,
+    'wrong-pin' => l10n.lockWrongPin,
+    'rate-limited' => l10n.lockRetryInSeconds(
+      (retryMilliseconds / 1000).ceil(),
+    ),
     'expired' => l10n.fingerprintExpired,
     'preparing' => l10n.fingerprintPreparing,
     'started' || 'enroll-stage-passed' => l10n.fingerprintTouchSensor,

@@ -349,7 +349,7 @@ fn automatic_lock_requires_native_authentication() {
     assert!(controller.security_gate_locked());
 }
 
-fn temporary_pin_store(name: &str) -> pin::PinStore {
+pub(super) fn temporary_pin_store(name: &str) -> pin::PinStore {
     let directory = std::env::temp_dir().join(format!(
         "deniald-pin-{name}-{}-{:?}",
         std::process::id(),
@@ -361,7 +361,7 @@ fn temporary_pin_store(name: &str) -> pin::PinStore {
 /// A record hashed with minimal Argon2 cost, so debug-build attempts finish
 /// well inside `wait_for_event`'s deadline. Verification reads the cost from
 /// the record, exactly as it does for records Settings writes.
-fn write_quick_record(store: &pin::PinStore, pin: &str) {
+pub(super) fn write_quick_record(store: &pin::PinStore, pin: &str) {
     use argon2::password_hash::{PasswordHasher, SaltString};
     let params = argon2::Params::new(8, 1, 1, None).unwrap();
     let hash = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
@@ -412,6 +412,8 @@ fn pin_store_round_trips_private_records_and_rejects_bad_pins() {
         assert!(!pin::valid_pin(invalid));
         assert!(store.save(invalid).is_err());
     }
+    // A PIN set before may have 4 to 12 digits; a new one has six.
+    assert!(pin::valid_pin(b"1234") && store.save(b"1234").is_err());
     assert_eq!(store.save(b"482916").unwrap(), 6);
     let mode = std::fs::metadata(store.path())
         .unwrap()
