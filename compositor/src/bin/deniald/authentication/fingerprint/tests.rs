@@ -153,7 +153,7 @@ fn match_unlocks_once_and_preserves_compositor_gate() {
 }
 
 #[test]
-fn screen_off_match_waits_for_wake_frame_then_settles_before_unlock() {
+fn screen_off_match_unlocks_with_the_wake_frame() {
     let controller = controller(true);
     let now = Instant::now();
     assert!(!controller.fingerprint_unlock_pending());
@@ -167,12 +167,8 @@ fn screen_off_match_waits_for_wake_frame_then_settles_before_unlock() {
     assert!(controller.try_event().is_none());
     let presented = now + Duration::from_secs(1);
     assert!(controller.advance_fingerprint_unlock(presented, false));
-    assert!(!controller.advance_fingerprint_unlock(presented, true));
-    controller.advance_fingerprint_unlock(presented + WAKE_SETTLE_DELAY / 2, true);
-    assert!(controller.fingerprint_unlock_pending());
     assert!(controller.locked());
-    assert!(controller.try_event().is_none());
-    controller.advance_fingerprint_unlock(presented + WAKE_SETTLE_DELAY, true);
+    assert!(!controller.advance_fingerprint_unlock(presented, true));
     assert!(!controller.fingerprint_unlock_pending());
     assert!(!controller.locked());
     assert!(controller.security_gate_locked());
@@ -194,7 +190,6 @@ fn relock_invalidates_a_validated_match_during_display_wake() {
     let now = Instant::now();
     assert!(complete_match(&controller.shared, 0));
     assert!(controller.advance_fingerprint_unlock(now, false));
-    controller.advance_fingerprint_unlock(now, true);
     controller.lock();
     assert!(!controller.fingerprint_unlock_pending());
     while controller.try_event().is_some() {}

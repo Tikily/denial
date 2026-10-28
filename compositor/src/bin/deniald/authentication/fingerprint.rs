@@ -18,7 +18,7 @@ const MANAGER: &str = "/net/reactivated/Fprint/Manager";
 const DEVICE_INTERFACE: &str = "net.reactivated.Fprint.Device";
 const CALL_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_UNAVAILABLE_RETRY: Duration = Duration::from_secs(30);
-const WAKE_SETTLE_DELAY: Duration = Duration::from_millis(150);
+const WAKE_SETTLE_DELAY: Duration = Duration::ZERO;
 /// A reader that listened this long before failing worked; it was the scan.
 const HEALTHY_ARMED: Duration = Duration::from_millis(500);
 
@@ -501,14 +501,14 @@ pub(super) fn advance_pending_unlock(
         return true;
     }
     match pending {
-        PendingUnlock::Waking => {
+        PendingUnlock::Waking if !WAKE_SETTLE_DELAY.is_zero() => {
             // Start the delay only after the wake frame reaches the display,
             // not when a DPMS request is merely queued.
             state.fingerprint_unlock = Some(PendingUnlock::Settling(now + WAKE_SETTLE_DELAY));
             return false;
         }
         PendingUnlock::Settling(deadline) if now < deadline => return false,
-        PendingUnlock::Validated | PendingUnlock::Settling(_) => {}
+        PendingUnlock::Validated | PendingUnlock::Waking | PendingUnlock::Settling(_) => {}
     }
     state.fingerprint_unlock = None;
     shared
