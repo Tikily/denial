@@ -1,0 +1,349 @@
+name: Build ARM64 mobile Denial
+run-name: Build ARM64 mobile Denial at ${{ github.sha }}
+
+# This is the hosted-runner fallback for contributors who cannot reach
+# chromium.googlesource.com / chrome-infra-packages.appspot.com, which the
+# Flutter engine bootstrap needs. It builds natively on GitHub's public
+# arm64 runner instead of the repository's x86-64 self-hosted builder.
+#
+# The artifact is a glibc AArch64 payload (Ubuntu 24.04 baseline). Build for
+# a musl device (postmarketOS/Alpine) separately; do not install this there
+# without gcompat and a dependency check.
+#
+# Trigger it by pushing the commit to the opt-in branch:
+#   git push origin dev:arm64-mobile
+# or run the workflow manually on that branch. The artifact contains
+# bin/deniald, bin/denialctl, bin/denial-portal, bundle/, outputs.conf and
+# run.sh (which selects the mobile shell profile).
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Shell profile selected by the launcher
+        required: true
+        default: mobile
+        type: choice
+        options:
+          - mobile
+          - desktop
+  push:
+    branches:
+      # Mobile builds are opt-in: push the commit you want built to this
+      # branch instead of making every dev push wait behind a multi-hour
+      # hosted engine build.
+      - arm64-mobile
+
+permissions:
+  contents: read
+
+concurrency:
+  group: denial-arm64-mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ARM64 mobile payload
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 350
+
+    env:
+      DENIAL_PC_DEDICATED_BUILDER: "1"
+      DENIAL_PC_RUST_TARGET: ${{ runner.temp }}/denial-rust
+      DENIAL_PC_DEPENDENCY_ROOT: ${{ runner.temp }}/denial-dependencies
+      DENIAL_FLUTTER_ENGINE_CACHE_ROOT: ${{ runner.temp }}/denial-flutter-engine
+      DENIAL_BUILD_JOBS: "4"
+      DENIAL_FLUTTER_ENGINE_JOBS: "4"
+      DENIAL_SHELL_PROFILE: ${{ inputs.profile || 'mobile' }}
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Check out the exact pushed commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require a native ARM64 runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -m
+          test "$(uname -m)" = aarch64
+          echo "shell profile: $DENIAL_SHELL_PROFILE"
+          free -h
+          df -h /
+
+      - name: Free runner disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The Flutter engine checkout plus its build needs more room than the
+          # untouched runner image leaves free. None of these toolchains are
+          # used by this build.
+          for path in \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost; do
+            sudo rm -rf --one-file-system -- "$path" 2>/dev/null || true
+          done
+          sudo apt-get clean
+          df -h /
+
+      - name: Install ARM64 build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            clang \
+            curl \
+            file \
+            git \
+            jq \
+            libcairo2-dev \
+            libclang-dev \
+            libdbus-1-dev \
+            libdisplay-info-dev \
+            libdrm-dev \
+            libegl-dev \
+            libfontconfig1-dev \
+            libfreetype-dev \
+            libgbm-dev \
+            libgl-dev \
+            libgles-dev \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libinput-dev \
+            libpango1.0-dev \
+            libpixman-1-dev \
+            libseat-dev \
+            libudev-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxext-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxrandr-dev \
+            lld \
+            ninja-build \
+            pkg-config \
+            python3 \
+            rsync \
+            unzip \
+            wayland-protocols \
+            xz-utils
+          sudo apt-get clean
+
+      - name: Ensure the pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --default-toolchain none
+          fi
+          if [[ -f "$HOME/.cargo/env" ]]; then
+            # shellcheck disable=SC1091
+            source "$HOME/.cargo/env"
+          fi
+          rustup show
+          cargo --version
+
+      - name: Show pinned sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq . prebuilt/flutter-engine/SOURCE_LOCK.json
+
+      - name: Bootstrap pinned Flutter and Rust dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/denial-pc bootstrap 2>&1 \
+            | tee "$RUNNER_TEMP/denial-bootstrap.log"
+
+      - name: Build ARM64 Flutter engine and shell bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          # prepare-app-build inside this command builds the native
+          # denial_host_release_arm64 engine from the locked Flutter/Skia
+          # sources, then assembles the Linux ARM64 AOT shell bundle.
+          tools/denial-pc bundle 2>&1 \
+            | tee "$RUNNER_TEMP/denial-bundle.log"
+
+      - name: Build ARM64 compositor and portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/denial-pc compositor 2>&1 \
+            | tee "$RUNNER_TEMP/denial-compositor.log"
+
+      - name: Stage, verify and archive the mobile payload
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "$DENIAL_SHELL_PROFILE" in
+            mobile | desktop) ;;
+            *)
+              printf 'unsupported shell profile: %s\n' \
+                "$DENIAL_SHELL_PROFILE" >&2
+              exit 1
+              ;;
+          esac
+
+          bundle="dart_shell/build/linux/arm64/release/bundle"
+          rust="$DENIAL_PC_RUST_TARGET/release"
+          payload="$RUNNER_TEMP/denial-linux-arm64-$DENIAL_SHELL_PROFILE"
+          archive="denial-linux-arm64-$DENIAL_SHELL_PROFILE-${GITHUB_SHA::12}.tar.gz"
+
+          for required in \
+            "$rust/deniald" \
+            "$rust/denialctl" \
+            "$rust/denial-portal" \
+            "$bundle/lib/libflutter_engine.so" \
+            "$bundle/lib/libapp.so" \
+            "$bundle/data/icudtl.dat" \
+            "$bundle/data/flutter_assets/AssetManifest.bin"; do
+            test -f "$required" || {
+              printf 'missing build artifact: %s\n' "$required" >&2
+              exit 1
+            }
+          done
+
+          case "$payload" in
+            "$RUNNER_TEMP"/denial-linux-arm64-*) ;;
+            *)
+              printf 'unexpected payload path: %s\n' "$payload" >&2
+              exit 1
+              ;;
+          esac
+          rm -rf --one-file-system -- "$payload"
+          install -d "$payload/bin"
+          install -m755 "$rust/deniald" "$payload/bin/deniald"
+          install -m755 "$rust/denialctl" "$payload/bin/denialctl"
+          install -m755 "$rust/denial-portal" "$payload/bin/denial-portal"
+          cp -a "$bundle" "$payload/bundle"
+          install -m644 packaging/arch/outputs.conf "$payload/outputs.conf"
+
+          cat >"$payload/run.sh" <<'EOF'
+          #!/bin/sh
+          set -eu
+          root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+          export DENIAL_SHELL_PROFILE=@PROFILE@
+          export DENIA_SHELL_PROFILE=@PROFILE@
+          exec "$root/bin/deniald" \
+            --device "${DENIAL_DRM_DEVICE:-/dev/dri/card0}" \
+            --output-config "$root/outputs.conf" \
+            --wayland \
+            --flutter-bundle "$root/bundle" \
+            "$@"
+          EOF
+          sed -i "s/@PROFILE@/$DENIAL_SHELL_PROFILE/" "$payload/run.sh"
+          chmod 0755 "$payload/run.sh"
+
+          jq -r '"flutter_revision=\(.flutter.revision)\nskia_revision=\(.skia.revision)\ndepot_tools_revision=\(.depot_tools.revision)"' \
+            prebuilt/flutter-engine/SOURCE_LOCK.json \
+            >"$payload/BUILD-INFO"
+          {
+            printf 'denial_commit=%s\n' "$GITHUB_SHA"
+            printf 'shell_profile=%s\n' "$DENIAL_SHELL_PROFILE"
+            printf 'runner_arch=%s\n' "$(uname -m)"
+            printf 'runner_os=%s\n' "$(lsb_release -ds 2>/dev/null || uname -srv)"
+          } >>"$payload/BUILD-INFO"
+
+          # Verify the payload contains AArch64 ELF files and no x86-64
+          # leftovers, then prove every dependency resolves on this runner.
+          {
+            file "$payload/bin/deniald" \
+              "$payload/bin/denialctl" \
+              "$payload/bin/denial-portal" \
+              "$payload/bundle/lib/libflutter_engine.so" \
+              "$payload/bundle/lib/libapp.so"
+          } | tee "$RUNNER_TEMP/denial-file.txt"
+          if grep -q 'x86-64' "$RUNNER_TEMP/denial-file.txt"; then
+            printf 'payload contains an x86-64 artifact\n' >&2
+            exit 1
+          fi
+          if ! grep -q 'aarch64' "$RUNNER_TEMP/denial-file.txt"; then
+            printf 'payload does not contain an AArch64 artifact\n' >&2
+            exit 1
+          fi
+          nm -D --defined-only "$payload/bundle/lib/libflutter_engine.so" \
+            >"$RUNNER_TEMP/denial-engine-symbols.txt"
+          for symbol in \
+            DenialFlutterEngineRequestFrameForExternalTextures \
+            DenialFlutterEngineScheduleFrameForExternalTextures \
+            FlutterEngineGetProcAddresses \
+            FlutterEngineRunsAOTCompiledDartCode; do
+            grep -q "[[:space:]]$symbol$" \
+              "$RUNNER_TEMP/denial-engine-symbols.txt" || {
+              printf 'engine is missing symbol: %s\n' "$symbol" >&2
+              exit 1
+            }
+          done
+          : >"$RUNNER_TEMP/denial-ldd.txt"
+          for elf in \
+            "$payload/bin/deniald" \
+            "$payload/bin/denial-portal" \
+            "$payload/bundle/lib/libflutter_engine.so"; do
+            ldd "$elf" >>"$RUNNER_TEMP/denial-ldd.txt"
+          done
+          if grep -q 'not found' "$RUNNER_TEMP/denial-ldd.txt"; then
+            printf 'payload has unresolved shared libraries\n' >&2
+            exit 1
+          fi
+          if ! timeout 15 "$payload/bin/deniald" --version \
+            >"$RUNNER_TEMP/denial-version.txt" 2>&1; then
+            printf 'deniald --version did not complete\n' \
+              >>"$RUNNER_TEMP/denial-version.txt"
+          fi
+          cat "$RUNNER_TEMP/denial-version.txt"
+
+          (
+            cd "$payload"
+            find . -type f ! -name SHA256SUMS -print0 \
+              | sort -z \
+              | xargs -0 sha256sum \
+              >SHA256SUMS
+            sha256sum -c --strict SHA256SUMS
+          )
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$archive" "$(basename "$payload")"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$archive" >"$archive.sha256"
+            cat "$archive.sha256"
+          )
+
+      - name: Upload ARM64 mobile payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: denial-linux-arm64-${{ inputs.profile || 'mobile' }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/denial-linux-arm64-*.tar.gz
+            ${{ runner.temp }}/denial-linux-arm64-*.tar.gz.sha256
+            ${{ runner.temp }}/denial-file.txt
+            ${{ runner.temp }}/denial-ldd.txt
+            ${{ runner.temp }}/denial-version.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload failed build logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: denial-linux-arm64-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/denial-*.log
+          if-no-files-found: ignore
+          retention-days: 3
